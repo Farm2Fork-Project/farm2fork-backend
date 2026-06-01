@@ -4,6 +4,9 @@ import * as Joi from 'joi';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { appConfig, swaggerConfig, validationConfig } from './config';
+import { DatabaseModule, RedisModule } from './infrastructure';
+
+const shouldLoadInfrastructure = process.env.NODE_ENV !== 'test';
 
 @Module({
   imports: [
@@ -18,6 +21,8 @@ import { appConfig, swaggerConfig, validationConfig } from './config';
         API_PREFIX: Joi.string().default('api'),
         API_VERSION: Joi.string().default('v1'),
         DATABASE_URL: Joi.string().optional(),
+        REDIS_URL: Joi.string().optional(),
+        CORS_ORIGIN: Joi.string().optional(),
         JWT_SECRET: Joi.string().optional(),
         JWT_EXPIRATION: Joi.string().default('24h'),
         SWAGGER_ENABLED: Joi.boolean().default(true),
@@ -29,6 +34,7 @@ import { appConfig, swaggerConfig, validationConfig } from './config';
       },
       load: [appConfig, swaggerConfig, validationConfig],
     }),
+    ...(shouldLoadInfrastructure ? [DatabaseModule, RedisModule] : []),
   ],
   controllers: [AppController],
   providers: [AppService],

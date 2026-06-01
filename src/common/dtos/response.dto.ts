@@ -4,12 +4,12 @@ export class SuccessResponseDto<T> {
   @ApiProperty({
     description: 'Success status',
   })
-  success: boolean;
+  success!: boolean;
 
   @ApiProperty({
     description: 'Response data',
   })
-  data: T;
+  data!: T;
 
   @ApiProperty({
     description: 'Response message',
@@ -22,34 +22,34 @@ export class PaginatedResponseDto<T> extends SuccessResponseDto<T[]> {
   @ApiProperty({
     description: 'Total count of items',
   })
-  total: number;
+  total!: number;
 
   @ApiProperty({
     description: 'Current page number',
   })
-  page: number;
+  page!: number;
 
   @ApiProperty({
     description: 'Items per page',
   })
-  limit: number;
+  limit!: number;
 
   @ApiProperty({
     description: 'Total pages',
   })
-  totalPages: number;
+  totalPages!: number;
 }
 
 export class ErrorResponseDto {
   @ApiProperty({
     description: 'Error status',
   })
-  success: boolean;
+  success!: boolean;
 
   @ApiProperty({
     description: 'Error message',
   })
-  message: string;
+  message!: string;
 
   @ApiProperty({
     description: 'Error details',
@@ -60,5 +60,5 @@ export class ErrorResponseDto {
   @ApiProperty({
     description: 'Timestamp of error',
   })
-  timestamp: string;
+  timestamp!: string;
 }

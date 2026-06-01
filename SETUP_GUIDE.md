@@ -49,9 +49,11 @@ NODE_ENV=development
 PORT=3000
 API_PREFIX=api
 API_VERSION=v1
+CORS_ORIGIN=http://localhost:3001,http://localhost:4200
 
-# Database (when you add database)
-DATABASE_URL=postgresql://user:password@localhost:5432/farm2fork
+# Database
+DATABASE_URL=mongodb://localhost:27017/farm2fork
+REDIS_URL=redis://localhost:6379
 
 # JWT (when you add authentication)
 JWT_SECRET=your_jwt_secret_key_here
@@ -101,6 +103,17 @@ pnpm start:dev
 # Swagger docs will be available at: http://localhost:3000/api/docs
 ```
 
+### Dockerized Development
+
+```bash
+# Start backend + MongoDB + Redis
+docker compose up --build
+
+# Backend:   http://localhost:3000
+# MongoDB:   mongodb://localhost:27017
+# Redis:     redis://localhost:6379
+```
+
 ### Build & Production
 
 ```bash
@@ -133,6 +146,7 @@ pnpm start:prod
 - Schema validation with Joi
 - Separate config files for different features
 - Global ConfigService access
+- Docker-friendly defaults for MongoDB and Redis
 
 ### 4. Custom Validators
 

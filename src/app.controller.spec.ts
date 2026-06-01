@@ -1,3 +1,4 @@
+import { beforeEach, describe, expect, jest, it } from '@jest/globals';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -15,7 +16,7 @@ describe('AppController', () => {
           provide: ConfigService,
           useValue: {
             get: jest.fn().mockReturnValue('v1'),
-          },
+          } satisfies Pick<ConfigService, 'get'>,
         },
       ],
     }).compile();

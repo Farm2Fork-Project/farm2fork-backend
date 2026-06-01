@@ -19,13 +19,17 @@ async function bootstrap() {
   const swaggerEnabled = configService.get<boolean>('SWAGGER_ENABLED', true);
   const swaggerPath = configService.get<string>('SWAGGER_PATH', 'api/docs');
   const nodeEnv = configService.get<string>('NODE_ENV', 'development');
+  const corsOrigin = configService.get<string>('CORS_ORIGIN', '*');
 
   // Set API prefix
   app.setGlobalPrefix(apiPrefix);
 
   // Enable CORS
   app.enableCors({
-    origin: true,
+    origin:
+      corsOrigin === '*'
+        ? true
+        : corsOrigin.split(',').map((item) => item.trim()),
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   });
@@ -79,8 +83,6 @@ async function bootstrap() {
       .build();
 
     const document = SwaggerModule.createDocument(app, config);
-
-
 
     SwaggerModule.setup(swaggerPath, app, document, {
       swaggerOptions: {

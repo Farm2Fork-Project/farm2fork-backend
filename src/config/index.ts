@@ -1,6 +1,10 @@
 export { appConfig } from './app.config';
 export type { IAppConfig } from './app.config';
+export { databaseConfig } from './database.config';
+export type { IDatabaseConfig } from './database.config';
 export { swaggerConfig } from './swagger.config';
 export type { ISwaggerConfig } from './swagger.config';
+export { redisConfig } from './redis.config';
+export type { IRedisConfig } from './redis.config';
 export { validationConfig } from './validation.config';
 export type { IValidationConfig } from './validation.config';
