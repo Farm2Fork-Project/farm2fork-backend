@@ -300,3 +300,19 @@ pnpm lint
 
 **Created:** December 22, 2025
 **Project:** Farm2Fork Backend API
+
+---
+
+- cd farm2fork-backend
+- docker compose up -d --build mongodb redis backend
+- curl <http://localhost:3000/api/health>
+- docker compose logs -f backend
+
+## To stop everything
+
+- docker compose down
+
+## If you want a full cleanup of the local dev stack, including volumes and local backend images
+
+- docker compose down --volumes --remove-orphans
+- docker image prune -f
