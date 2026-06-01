@@ -1,9 +1,8 @@
 import { Global, Module, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
+import { REDIS_CLIENT } from './redis.constants';
 import { RedisService } from './redis.service';
-
-export const REDIS_CLIENT = Symbol('REDIS_CLIENT');
 
 @Global()
 @Module({

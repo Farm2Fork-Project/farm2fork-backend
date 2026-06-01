@@ -2,26 +2,34 @@ FROM node:24.16.0-alpine3.23 AS base
 WORKDIR /app
 RUN corepack enable
 
-COPY package.json pnpm-lock.yaml ./
+FROM base AS deps
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
-FROM base AS development
+FROM deps AS build
+COPY . .
+RUN rm -f tsconfig.build.tsbuildinfo && pnpm build
+
+FROM base AS prod-deps
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile --prod
+
+FROM deps AS development
 COPY . .
 EXPOSE 3000
 CMD ["pnpm", "start:dev"]
 
-FROM base AS build
-COPY . .
-RUN pnpm build
-
 FROM node:24.16.0-alpine3.23 AS production
 WORKDIR /app
-ENV NODE_ENV=production
 RUN corepack enable
+RUN addgroup -S farm2fork && adduser -S farm2fork -G farm2fork
 
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --prod --frozen-lockfile
-
+COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+COPY package.json ./
+
+USER farm2fork
+
+ENV NODE_ENV=production
 EXPOSE 3000
 CMD ["node", "dist/main"]
