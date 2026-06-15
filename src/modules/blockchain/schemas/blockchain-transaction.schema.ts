@@ -89,8 +89,7 @@ export class BlockchainPayload {
   @Prop({ type: SupplyChainPayloadSchema, default: null })
   supplyChain!: SupplyChainPayload | null;
 }
-const BlockchainPayloadSchema =
-  SchemaFactory.createForClass(BlockchainPayload);
+const BlockchainPayloadSchema = SchemaFactory.createForClass(BlockchainPayload);
 
 /**
  * blockchain_transactions (Collection 5.9).

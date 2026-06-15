@@ -1,8 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 
-export type TransporterProfileDocument =
-  HydratedDocument<TransporterProfile>;
+export type TransporterProfileDocument = HydratedDocument<TransporterProfile>;
 
 export enum VehicleType {
   Bike = 'bike',
