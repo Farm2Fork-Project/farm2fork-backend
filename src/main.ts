@@ -80,6 +80,12 @@ async function bootstrap() {
       .addServer(`http://localhost:${port}`, 'Local Development')
       .addServer(`https://api.farm2fork.com`, 'Production')
       .addTag('Health', 'Application health check endpoints')
+      .addTag(
+        'Auth',
+        'Registration, login, email verification and password reset',
+      )
+      .addTag('Orders', 'Order placement, listing and cancellation')
+      .addTag('Payments', 'Payment initiation, gateway callbacks and refunds')
       .build();
 
     const document = SwaggerModule.createDocument(app, config);
