@@ -1,15 +1,20 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { MarketplaceController } from './marketplace.controller';
+import { MarketplaceService } from './marketplace.service';
 import { Product, ProductSchema } from './schemas/product.schema';
 
 /**
- * MarketplaceModule (EP-02). Currently registers the products data layer.
- * Listings, search, filter and QR generation arrive in Sprint 2.
+ * MarketplaceModule (EP-02). Registers the products data layer and exposes the
+ * listing/search/QR API surface. Endpoints currently return DTO-shaped mock
+ * data; real persistence lands in Sprint 2.
  */
 @Module({
   imports: [
     MongooseModule.forFeature([{ name: Product.name, schema: ProductSchema }]),
   ],
-  exports: [MongooseModule],
+  controllers: [MarketplaceController],
+  providers: [MarketplaceService],
+  exports: [MongooseModule, MarketplaceService],
 })
 export class MarketplaceModule {}
