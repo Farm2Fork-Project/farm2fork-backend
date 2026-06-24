@@ -1,33 +1,56 @@
-import { Injectable } from '@nestjs/common';
-import { Types } from 'mongoose';
 import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import {
+  FilterQuery,
+  Model,
+  SortOrder as MongooseSortOrder,
+  Types,
+} from 'mongoose';
+import * as QRCode from 'qrcode';
+import {
+  Product,
+  ProductDocument,
   ProductStatus,
-  ProductUnit,
-  QualityGrade,
 } from './schemas/product.schema';
 import {
   CreateProductDto,
   ProductListResponseDto,
   ProductQrResponseDto,
   ProductResponseDto,
+  ProductSortBy,
   QueryProductDto,
+  SortOrder,
   UpdateProductDto,
 } from './dto';
 
 /**
  * MarketplaceService (EP-02).
  *
- * NOTE: every method currently returns DTO-shaped MOCK data so the mobile/web
- * teams can integrate against the documented contract. Real Mongoose-backed
- * listings, search, filtering and QR generation land in Sprint 2.
+ * Real Mongoose-backed listing, search, filtering, ownership enforcement and
+ * traceability QR generation against the products collection (master context
+ * 5.6). The first blockchain traceability record is referenced via
+ * initialBlockchainRecordId - the retired name blockchainTxId is never used.
  */
 @Injectable()
 export class MarketplaceService {
-  create(farmerId: string, dto: CreateProductDto): ProductResponseDto {
-    const id = new Types.ObjectId().toHexString();
-    return this.sampleProduct({
-      id,
-      farmerId,
+  constructor(
+    @InjectModel(Product.name)
+    private readonly productModel: Model<ProductDocument>,
+  ) {}
+
+  async create(
+    farmerId: string,
+    dto: CreateProductDto,
+  ): Promise<ProductResponseDto> {
+    // Pre-allocate the id so the QR trace URL can embed it before persistence.
+    const id = new Types.ObjectId();
+    const created = await this.productModel.create({
+      _id: id,
+      farmerId: new Types.ObjectId(farmerId),
       name: dto.name,
       category: dto.category,
       description: dto.description,
@@ -36,112 +59,171 @@ export class MarketplaceService {
       unit: dto.unit,
       images: dto.images ?? [],
       qualityGrade: dto.qualityGrade,
-      qrCode: this.buildQrUrl(id),
+      qrCode: this.buildTraceUrl(id.toHexString()),
       status: ProductStatus.Active,
     });
+    return this.toResponse(created);
   }
 
-  findAll(query: QueryProductDto): ProductListResponseDto {
-    return this.paginate(query, this.sampleCatalog());
+  async findAll(query: QueryProductDto): Promise<ProductListResponseDto> {
+    return this.search(query, this.buildFilter(query));
   }
 
-  findMine(farmerId: string, query: QueryProductDto): ProductListResponseDto {
-    const owned = this.sampleCatalog().map((p) => ({ ...p, farmerId }));
-    return this.paginate(query, owned);
+  async findMine(
+    farmerId: string,
+    query: QueryProductDto,
+  ): Promise<ProductListResponseDto> {
+    const filter = this.buildFilter(query);
+    filter.farmerId = new Types.ObjectId(farmerId);
+    return this.search(query, filter);
   }
 
-  findOne(id: string): ProductResponseDto {
-    return this.sampleProduct({ id, qrCode: this.buildQrUrl(id) });
+  async findOne(id: string): Promise<ProductResponseDto> {
+    return this.toResponse(await this.getOwnedOrAny(id));
   }
 
-  update(
+  async update(
     id: string,
-    _farmerId: string,
+    farmerId: string,
     dto: UpdateProductDto,
-  ): ProductResponseDto {
-    return this.sampleProduct({
-      id,
-      qrCode: this.buildQrUrl(id),
-      ...dto,
-      updatedAt: new Date().toISOString(),
-    });
+  ): Promise<ProductResponseDto> {
+    const product = await this.getOwned(id, farmerId);
+    if (dto.name !== undefined) product.name = dto.name;
+    if (dto.category !== undefined) product.category = dto.category;
+    if (dto.description !== undefined) product.description = dto.description;
+    if (dto.price !== undefined) product.price = dto.price;
+    if (dto.quantity !== undefined) product.quantity = dto.quantity;
+    if (dto.unit !== undefined) product.unit = dto.unit;
+    if (dto.images !== undefined) product.images = dto.images;
+    if (dto.qualityGrade !== undefined) product.qualityGrade = dto.qualityGrade;
+    if (dto.status !== undefined) product.status = dto.status;
+    await product.save();
+    return this.toResponse(product);
   }
 
-  remove(id: string, _farmerId: string): { id: string; deleted: boolean } {
+  async remove(
+    id: string,
+    farmerId: string,
+  ): Promise<{ id: string; deleted: boolean }> {
+    const product = await this.getOwned(id, farmerId);
+    // Soft delete: deactivate the listing so traceability/blockchain linkage and
+    // historical order snapshots are preserved.
+    product.status = ProductStatus.Inactive;
+    await product.save();
     return { id, deleted: true };
   }
 
-  getQr(id: string): ProductQrResponseDto {
-    return {
-      productId: id,
-      qrCode: this.buildQrUrl(id),
-      qrImageDataUri: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAMOCK',
-    };
+  async getQr(id: string): Promise<ProductQrResponseDto> {
+    const product = await this.getOwnedOrAny(id);
+    const qrCode = product.qrCode ?? this.buildTraceUrl(product.id as string);
+    const qrImageDataUri = await QRCode.toDataURL(qrCode, {
+      errorCorrectionLevel: 'M',
+      margin: 1,
+    });
+    return { productId: product.id as string, qrCode, qrImageDataUri };
   }
 
-  // --- mock helpers ----------------------------------------------------------
+  // --- internals -------------------------------------------------------------
 
-  private buildQrUrl(id: string): string {
+  private buildTraceUrl(id: string): string {
     return `https://farm2fork.com/trace/${id}`;
   }
 
-  private paginate(
+  private buildFilter(query: QueryProductDto): FilterQuery<ProductDocument> {
+    const filter: FilterQuery<ProductDocument> = {};
+
+    if (query.search) {
+      // Escape user input before using it in a RegExp to avoid ReDoS / injection.
+      const escaped = query.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.name = { $regex: escaped, $options: 'i' };
+    }
+    if (query.category) filter.category = query.category;
+    if (query.unit) filter.unit = query.unit;
+    if (query.qualityGrade) filter.qualityGrade = query.qualityGrade;
+    if (query.status) filter.status = query.status;
+    if (query.farmerId && Types.ObjectId.isValid(query.farmerId)) {
+      filter.farmerId = new Types.ObjectId(query.farmerId);
+    }
+    if (query.minPrice !== undefined || query.maxPrice !== undefined) {
+      const priceRange: { $gte?: number; $lte?: number } = {};
+      if (query.minPrice !== undefined) priceRange.$gte = query.minPrice;
+      if (query.maxPrice !== undefined) priceRange.$lte = query.maxPrice;
+      filter.price = priceRange;
+    }
+    return filter;
+  }
+
+  private async search(
     query: QueryProductDto,
-    catalog: ProductResponseDto[],
-  ): ProductListResponseDto {
+    filter: FilterQuery<ProductDocument>,
+  ): Promise<ProductListResponseDto> {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
-    const total = 42; // mock total
+    const sortField = query.sortBy ?? ProductSortBy.CreatedAt;
+    const sortDir: MongooseSortOrder =
+      (query.sortOrder ?? SortOrder.Desc) === SortOrder.Asc ? 1 : -1;
+
+    const [items, total] = await Promise.all([
+      this.productModel
+        .find(filter)
+        .sort({ [sortField]: sortDir })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .exec(),
+      this.productModel.countDocuments(filter).exec(),
+    ]);
+
     return {
-      data: catalog.slice(0, limit),
+      data: items.map((p) => this.toResponse(p)),
       total,
       page,
       limit,
-      totalPages: Math.ceil(total / limit),
+      totalPages: Math.ceil(total / limit) || 0,
     };
   }
 
-  private sampleCatalog(): ProductResponseDto[] {
-    return [
-      this.sampleProduct({
-        name: 'Roma Tomatoes',
-        category: 'vegetables',
-        price: 120,
-        unit: ProductUnit.Kg,
-        qualityGrade: QualityGrade.A,
-      }),
-      this.sampleProduct({
-        id: '6a2fe77bb77795516febc288',
-        name: 'Basmati Rice',
-        category: 'grains',
-        price: 380,
-        unit: ProductUnit.Kg,
-        qualityGrade: QualityGrade.B,
-      }),
-    ];
+  /** Loads a product the farmer owns, or throws 404/403. */
+  private async getOwned(
+    id: string,
+    farmerId: string,
+  ): Promise<ProductDocument> {
+    const product = await this.getOwnedOrAny(id);
+    if (product.farmerId.toHexString() !== farmerId) {
+      throw new ForbiddenException('You do not own this listing');
+    }
+    return product;
   }
 
-  private sampleProduct(
-    overrides: Partial<ProductResponseDto> = {},
-  ): ProductResponseDto {
-    const now = new Date().toISOString();
-    const base: ProductResponseDto = {
-      id: '6a2fe77bb77795516febc287',
-      farmerId: '6a2fe77bb77795516febc111',
-      name: 'Roma Tomatoes',
-      category: 'vegetables',
-      description: 'Fresh sun-ripened Roma tomatoes',
-      price: 120,
-      quantity: 500,
-      unit: ProductUnit.Kg,
-      images: ['https://cdn.farm2fork.com/products/tomatoes-1.jpg'],
-      qualityGrade: QualityGrade.A,
-      qrCode: 'https://farm2fork.com/trace/6a2fe77bb77795516febc287',
-      initialBlockchainRecordId: '6a2fe77bb77795516febc999',
-      status: ProductStatus.Active,
-      createdAt: now,
-      updatedAt: now,
+  /** Loads any product by id, or throws 404. */
+  private async getOwnedOrAny(id: string): Promise<ProductDocument> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException('Product not found');
+    }
+    const product = await this.productModel.findById(id).exec();
+    if (!product) {
+      throw new NotFoundException('Product not found');
+    }
+    return product;
+  }
+
+  private toResponse(product: ProductDocument): ProductResponseDto {
+    return {
+      id: product.id as string,
+      farmerId: product.farmerId.toHexString(),
+      name: product.name,
+      category: product.category,
+      description: product.description,
+      price: product.price,
+      quantity: product.quantity,
+      unit: product.unit,
+      images: product.images,
+      qualityGrade: product.qualityGrade,
+      qrCode: product.qrCode,
+      initialBlockchainRecordId:
+        product.initialBlockchainRecordId?.toHexString(),
+      status: product.status,
+      createdAt: product.createdAt.toISOString(),
+      updatedAt: product.updatedAt.toISOString(),
     };
-    return { ...base, ...overrides };
   }
 }

@@ -6,8 +6,7 @@ import { Product, ProductSchema } from './schemas/product.schema';
 
 /**
  * MarketplaceModule (EP-02). Registers the products data layer and exposes the
- * listing/search/QR API surface. Endpoints currently return DTO-shaped mock
- * data; real persistence lands in Sprint 2.
+ * listing/search/QR API surface backed by real Mongoose persistence.
  */
 @Module({
   imports: [

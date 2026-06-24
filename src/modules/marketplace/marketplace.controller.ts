@@ -53,7 +53,7 @@ export class MarketplaceController {
   create(
     @CurrentUser() user: RequestUser,
     @Body() dto: CreateProductDto,
-  ): ProductResponseDto {
+  ): Promise<ProductResponseDto> {
     return this.marketplaceService.create(user.id, dto);
   }
 
@@ -65,7 +65,7 @@ export class MarketplaceController {
       'Authenticated farmer, buyer, transporter or admin. Supports text search, category/unit/grade/status filters, price range, sorting and pagination.',
   })
   @ApiOkResponse({ type: ProductListResponseDto })
-  findAll(@Query() query: QueryProductDto): ProductListResponseDto {
+  findAll(@Query() query: QueryProductDto): Promise<ProductListResponseDto> {
     return this.marketplaceService.findAll(query);
   }
 
@@ -79,7 +79,7 @@ export class MarketplaceController {
   findMine(
     @CurrentUser() user: RequestUser,
     @Query() query: QueryProductDto,
-  ): ProductListResponseDto {
+  ): Promise<ProductListResponseDto> {
     return this.marketplaceService.findMine(user.id, query);
   }
 
@@ -88,7 +88,7 @@ export class MarketplaceController {
   @ApiOperation({ summary: 'Get a single product by id' })
   @ApiParam({ name: 'id', description: 'Product id' })
   @ApiOkResponse({ type: ProductResponseDto })
-  findOne(@Param('id') id: string): ProductResponseDto {
+  findOne(@Param('id') id: string): Promise<ProductResponseDto> {
     return this.marketplaceService.findOne(id);
   }
 
@@ -100,7 +100,7 @@ export class MarketplaceController {
   })
   @ApiParam({ name: 'id', description: 'Product id' })
   @ApiOkResponse({ type: ProductQrResponseDto })
-  getQr(@Param('id') id: string): ProductQrResponseDto {
+  getQr(@Param('id') id: string): Promise<ProductQrResponseDto> {
     return this.marketplaceService.getQr(id);
   }
 
@@ -116,7 +116,7 @@ export class MarketplaceController {
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
     @Body() dto: UpdateProductDto,
-  ): ProductResponseDto {
+  ): Promise<ProductResponseDto> {
     return this.marketplaceService.update(id, user.id, dto);
   }
 
@@ -135,7 +135,7 @@ export class MarketplaceController {
   remove(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
-  ): { id: string; deleted: boolean } {
+  ): Promise<{ id: string; deleted: boolean }> {
     return this.marketplaceService.remove(id, user.id);
   }
 }
