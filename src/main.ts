@@ -85,6 +85,8 @@ async function bootstrap() {
         'Registration, login, email verification and password reset',
       )
       .addTag('Marketplace', 'Product listings, search, filtering and QR codes')
+      .addTag('Orders', 'Order placement, listing and cancellation')
+      .addTag('Payments', 'Payment initiation, gateway callbacks and refunds')
       .build();
 
     const document = SwaggerModule.createDocument(app, config);
