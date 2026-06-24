@@ -44,7 +44,7 @@ export class OrderController {
   create(
     @CurrentUser() user: RequestUser,
     @Body() dto: CreateOrderDto,
-  ): OrderResponseDto {
+  ): Promise<OrderResponseDto> {
     return this.orderService.create(user.id, dto);
   }
 
@@ -59,7 +59,7 @@ export class OrderController {
   findAll(
     @CurrentUser() user: RequestUser,
     @Query() query: QueryOrderDto,
-  ): OrderListResponseDto {
+  ): Promise<OrderListResponseDto> {
     return this.orderService.findAll(user, query);
   }
 
@@ -74,7 +74,7 @@ export class OrderController {
   findOne(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
-  ): OrderResponseDto {
+  ): Promise<OrderResponseDto> {
     return this.orderService.findOne(id, user);
   }
 
@@ -90,7 +90,7 @@ export class OrderController {
   cancel(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
-  ): OrderResponseDto {
+  ): Promise<OrderResponseDto> {
     return this.orderService.cancel(id, user);
   }
 }
