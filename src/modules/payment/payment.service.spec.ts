@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, NotImplementedException } from '@nestjs/common';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Types } from 'mongoose';
@@ -9,7 +9,10 @@ import {
   BlockchainTxStatus,
   BlockchainTxType,
 } from '../blockchain/schemas/blockchain-transaction.schema';
-import { Product } from '../marketplace/schemas/product.schema';
+import {
+  Product,
+  ProductStatus,
+} from '../marketplace/schemas/product.schema';
 import { Order, OrderStatus } from '../order/schemas/order.schema';
 import { Payment, PaymentGateway, PaymentStatus } from './schemas/payment.schema';
 import { PaymentService } from './payment.service';
@@ -239,6 +242,41 @@ describe('PaymentService', () => {
     expect(productModel.updateOne).not.toHaveBeenCalled();
     expect(orderModel.findById).not.toHaveBeenCalled();
     expect(blockchainModel.create).not.toHaveBeenCalled();
+  });
+
+  it('marks a product sold out when settlement reduces stock to zero', async () => {
+    const productId = new Types.ObjectId();
+    const payment = makePayment();
+    payment.save.mockResolvedValue(payment);
+    const order = makeOrder({
+      items: [{ productId, quantity: 2 }],
+      save: jest.fn(),
+    });
+    order.save.mockResolvedValue(order);
+
+    paymentModel.findOne.mockReturnValue(transactionQuery(payment));
+    orderModel.findById.mockReturnValue(transactionQuery(order));
+    productModel.updateOne
+      .mockReturnValueOnce(transactionQuery({ modifiedCount: 1 }))
+      .mockReturnValueOnce(transactionQuery({ modifiedCount: 1 }));
+    blockchainModel.create.mockResolvedValue([{ _id: new Types.ObjectId() }]);
+
+    await service.simulate(payment.id, buyerId, PaymentStatus.Success);
+
+    expect(productModel.updateOne).toHaveBeenLastCalledWith(
+      { _id: productId, quantity: 0 },
+      { $set: { status: ProductStatus.SoldOut } },
+      { session },
+    );
+  });
+
+  it('rejects public webhooks until provider signature verification exists', () => {
+    expect(() =>
+      service.handleWebhook(PaymentGateway.JazzCash, {
+        gatewayRef: 'unverified-reference',
+        status: PaymentStatus.Success,
+      }),
+    ).toThrow(NotImplementedException);
   });
 
   it('does not allow simulated settlement when the simulator is disabled', async () => {

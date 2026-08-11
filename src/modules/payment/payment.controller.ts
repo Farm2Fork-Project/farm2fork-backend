@@ -79,7 +79,7 @@ export class PaymentController {
   @ApiOperation({
     summary: 'Gateway payment callback (public)',
     description:
-      'Called by JazzCash/Stripe, not by clients. Verifies the signature, flips the payment to success/failed, then records the payment on the blockchain and notifies the buyer (§6.4, §6.5).',
+      'Reserved for JazzCash/Stripe callbacks. It returns 501 until provider-specific signature verification is implemented.',
   })
   @ApiParam({ name: 'gateway', enum: PaymentGateway })
   @ApiOkResponse({

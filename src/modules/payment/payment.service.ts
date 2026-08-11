@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  NotImplementedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
@@ -17,7 +18,11 @@ import {
 } from '../blockchain/schemas/blockchain-transaction.schema';
 import { RequestUser } from '../../common/guards/roles.guard';
 import { UserRole } from '../../common/enums/user-role.enum';
-import { Product, ProductDocument } from '../marketplace/schemas/product.schema';
+import {
+  Product,
+  ProductDocument,
+  ProductStatus,
+} from '../marketplace/schemas/product.schema';
 import { Order, OrderDocument, OrderStatus } from '../order/schemas/order.schema';
 import {
   Payment,
@@ -152,6 +157,13 @@ export class PaymentService {
           if (update.modifiedCount !== 1) {
             throw new BadRequestException('Insufficient stock to settle order');
           }
+          await this.productModel
+            .updateOne(
+              { _id: item.productId, quantity: 0 },
+              { $set: { status: ProductStatus.SoldOut } },
+              { session },
+            )
+            .exec();
         }
 
         const [blockchainRecord] = await this.blockchainModel.create(
@@ -214,7 +226,11 @@ export class PaymentService {
     gateway: PaymentGateway,
     dto: PaymentWebhookDto,
   ): { received: boolean; gateway: PaymentGateway; status: string } {
-    return { received: true, gateway, status: dto.status };
+    void gateway;
+    void dto;
+    throw new NotImplementedException(
+      'Gateway webhook signature verification is not implemented',
+    );
   }
 
   refund(id: string): PaymentResponseDto {
