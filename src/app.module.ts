@@ -55,6 +55,7 @@ const featureModules = [
         CORS_ORIGIN: Joi.string().optional(),
         JWT_SECRET: Joi.string().optional(),
         JWT_EXPIRATION: Joi.string().default('24h'),
+        PAYMENT_SIMULATOR_ENABLED: Joi.boolean().default(false),
         SWAGGER_ENABLED: Joi.boolean().default(true),
         SWAGGER_PATH: Joi.string().default('api/docs'),
       }),

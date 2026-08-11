@@ -4,38 +4,22 @@ services:
       context: .
       target: development
     container_name: f2f-nestjs
-    env_file:
-      - .env
     environment:
-      DATABASE_URL: mongodb://mongodb:27017/farm2fork
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
     ports:
       - '3000:3000'
     depends_on:
-      mongodb:
-        condition: service_healthy
       redis:
         condition: service_healthy
     volumes:
       - .:/app
       - /app/node_modules
 
-  mongodb:
-    image: mongo:8.2.4-noble
-    container_name: f2f-mongodb
-    ports:
-      - '27017:27017'
-    volumes:
-      - mongodb_data:/data/db
-    healthcheck:
-      test: ['CMD', 'mongosh', '--quiet', '--eval', 'db.runCommand({ ping: 1 })']
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   redis:
     image: redis:8.6.3-alpine3.23
     container_name: f2f-redis
+    command: redis-server --appendonly yes
     ports:
       - '6379:6379'
     volumes:
@@ -47,5 +31,4 @@ services:
       retries: 5
 
 volumes:
-  mongodb_data:
   redis_data:

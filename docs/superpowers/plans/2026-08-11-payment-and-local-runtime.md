@@ -88,9 +88,9 @@ services:
     build:
       context: .
       target: development
-    env_file: [.env]
     environment:
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
     ports: ['3000:3000']
     depends_on:
       redis:
@@ -109,7 +109,7 @@ volumes:
   redis_data:
 ```
 
-Add `.env.example` with `DATABASE_URL=mongodb+srv://<user>:<password>@<cluster>/farm2fork?retryWrites=true&w=majority`, `REDIS_URL=redis://redis:6379`, `JWT_SECRET=replace-with-a-long-random-secret`, and `PAYMENT_SIMULATOR_ENABLED=true`; do not create `.env`.
+Add `.env.example` with `DATABASE_URL=mongodb+srv://<user>:<password>@<cluster>/farm2fork?retryWrites=true&w=majority`, `REDIS_URL=redis://redis:6379`, `JWT_SECRET=replace-with-a-long-random-secret`, and `PAYMENT_SIMULATOR_ENABLED=true`; do not create `.env`. Compose does not declare `env_file: .env`; it receives variables from the shell, an optional developer `.env`, or `--env-file`.
 
 In `src/app.module.ts`, validate `PAYMENT_SIMULATOR_ENABLED` as a boolean defaulting to `false`.
 
@@ -118,7 +118,7 @@ In `src/app.module.ts`, validate `PAYMENT_SIMULATOR_ENABLED` as a boolean defaul
 Run:
 
 ```bash
-docker compose config
+docker compose --env-file .env.example config
 rg -n 'mongodb:|f2f-mongodb|mongodb_data' docker-compose.yml
 ```
 

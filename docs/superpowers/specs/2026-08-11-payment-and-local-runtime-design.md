@@ -31,11 +31,12 @@ the boundaries needed to add JazzCash or Stripe later.
 
 ## Local Runtime
 
-`docker compose up` runs `backend` and `redis` only. The backend receives
-`DATABASE_URL` for Atlas and `REDIS_URL=redis://redis:6379` through an
-uncommitted `.env` file. `.env.example` documents required values without
-containing credentials. Health checks ensure Redis is ready before the backend
-starts.
+`docker compose up` runs `backend` and `redis` only. Compose receives the Atlas
+connection through the required `DATABASE_URL` environment variable and defaults
+`REDIS_URL` to `redis://redis:6379`. A developer may provide those values from
+an uncommitted `.env` file, but Compose does not declare `env_file: .env`.
+`.env.example` documents required values without containing credentials. Health
+checks ensure Redis is ready before the backend starts.
 
 Flutter is a native mobile client, so it is not a Docker runtime service. Its
 tests or Android build may later run in a container, but it must still run on a
