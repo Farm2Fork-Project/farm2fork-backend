@@ -1,4 +1,4 @@
-import { ConfigService } from '@nestjs/config';
+import { registerAs } from '@nestjs/config';
 
 export interface IBlockchainConfig {
   enabled: boolean;
@@ -15,27 +15,23 @@ export interface IBlockchainConfig {
   identityKeyPath?: string;
 }
 
-export const blockchainConfig = (): IBlockchainConfig => {
-  const configService = new ConfigService();
-
-  return {
-    enabled: configService.get('BLOCKCHAIN_WORKER_ENABLED', false),
-    pollIntervalMs: configService.get('BLOCKCHAIN_POLL_INTERVAL_MS', 5_000),
-    leaseDurationMs: configService.get('BLOCKCHAIN_LEASE_DURATION_MS', 30_000),
-    retryBaseDelayMs: configService.get(
-      'BLOCKCHAIN_RETRY_BASE_DELAY_MS',
-      5_000,
+export const blockchainConfig = registerAs(
+  'blockchain',
+  (): IBlockchainConfig => ({
+    enabled: process.env.BLOCKCHAIN_WORKER_ENABLED === 'true',
+    pollIntervalMs: Number(process.env.BLOCKCHAIN_POLL_INTERVAL_MS ?? 5_000),
+    leaseDurationMs: Number(process.env.BLOCKCHAIN_LEASE_DURATION_MS ?? 30_000),
+    retryBaseDelayMs: Number(
+      process.env.BLOCKCHAIN_RETRY_BASE_DELAY_MS ?? 5_000,
     ),
-    channelName: configService.get('FABRIC_CHANNEL_NAME', 'farm2forkchannel'),
-    chaincodeName: configService.get('FABRIC_CHAINCODE_NAME', 'farm2fork'),
-    mspId: configService.get('FABRIC_MSP_ID', 'Org1MSP'),
-    peerEndpoint: configService.get('FABRIC_PEER_ENDPOINT', 'localhost:7051'),
-    peerHostAlias: configService.get(
-      'FABRIC_PEER_HOST_ALIAS',
-      'peer0.org1.example.com',
-    ),
-    tlsRootCertPath: configService.get('FABRIC_TLS_ROOT_CERT_PATH'),
-    identityCertPath: configService.get('FABRIC_IDENTITY_CERT_PATH'),
-    identityKeyPath: configService.get('FABRIC_IDENTITY_KEY_PATH'),
-  };
-};
+    channelName: process.env.FABRIC_CHANNEL_NAME ?? 'farm2forkchannel',
+    chaincodeName: process.env.FABRIC_CHAINCODE_NAME ?? 'farm2fork',
+    mspId: process.env.FABRIC_MSP_ID ?? 'Org1MSP',
+    peerEndpoint: process.env.FABRIC_PEER_ENDPOINT ?? 'localhost:7051',
+    peerHostAlias:
+      process.env.FABRIC_PEER_HOST_ALIAS ?? 'peer0.org1.example.com',
+    tlsRootCertPath: process.env.FABRIC_TLS_ROOT_CERT_PATH,
+    identityCertPath: process.env.FABRIC_IDENTITY_CERT_PATH,
+    identityKeyPath: process.env.FABRIC_IDENTITY_KEY_PATH,
+  }),
+);
