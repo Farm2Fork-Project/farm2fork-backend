@@ -69,7 +69,12 @@ export class FabricGatewayService
     try {
       const submitted = await this.requireContract().submitAsync(
         submission.name,
-        { arguments: submission.arguments },
+        {
+          arguments: submission.arguments,
+          endorsingOrganizations: [
+            this.config.getOrThrow<string>('blockchain.mspId'),
+          ],
+        },
       );
       const status = await submitted.getStatus();
       if (!status.successful) {

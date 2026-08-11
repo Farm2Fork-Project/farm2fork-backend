@@ -36,7 +36,7 @@ export interface FabricContract {
   ): Promise<Uint8Array>;
   submitAsync(
     name: string,
-    options: { arguments: string[] },
+    options: { arguments: string[]; endorsingOrganizations?: string[] },
   ): Promise<FabricSubmittedTransaction>;
 }
 

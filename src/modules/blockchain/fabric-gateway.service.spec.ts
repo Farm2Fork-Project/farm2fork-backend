@@ -24,6 +24,7 @@ describe('FabricGatewayService', () => {
       const values: Record<string, string> = {
         'blockchain.channelName': 'farm2forkchannel',
         'blockchain.chaincodeName': 'farm2fork',
+        'blockchain.mspId': 'Farm2ForkMSP',
       };
       return values[key];
     }),
@@ -71,6 +72,7 @@ describe('FabricGatewayService', () => {
         'stripe',
         paidAt.toISOString(),
       ],
+      endorsingOrganizations: ['Farm2ForkMSP'],
     });
   });
 
@@ -102,6 +104,7 @@ describe('FabricGatewayService', () => {
           'transporter',
           timestamp.toISOString(),
         ],
+        endorsingOrganizations: ['Farm2ForkMSP'],
       },
     );
   });
