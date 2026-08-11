@@ -25,7 +25,7 @@ export const blockchainConfig = registerAs(
       process.env.BLOCKCHAIN_RETRY_BASE_DELAY_MS ?? 5_000,
     ),
     channelName: process.env.FABRIC_CHANNEL_NAME ?? 'farm2forkchannel',
-    chaincodeName: process.env.FABRIC_CHAINCODE_NAME ?? 'farm2fork',
+    chaincodeName: process.env.FABRIC_CHAINCODE_NAME ?? 'farm2fork-chaincode',
     mspId: process.env.FABRIC_MSP_ID ?? 'Org1MSP',
     peerEndpoint: process.env.FABRIC_PEER_ENDPOINT ?? 'localhost:7051',
     peerHostAlias:

@@ -27,4 +27,21 @@ describe('blockchainConfig', () => {
 
     await moduleRef.close();
   });
+
+  it('defaults to the chaincode deployed by the local Fabric network', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [
+        ConfigModule.forRoot({
+          ignoreEnvFile: true,
+          load: [blockchainConfig],
+        }),
+      ],
+    }).compile();
+
+    expect(
+      moduleRef.get(ConfigService).get<string>('blockchain.chaincodeName'),
+    ).toBe('farm2fork-chaincode');
+
+    await moduleRef.close();
+  });
 });
