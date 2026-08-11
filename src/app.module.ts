@@ -6,7 +6,12 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
-import { appConfig, swaggerConfig, validationConfig } from './config';
+import {
+  appConfig,
+  blockchainConfig,
+  swaggerConfig,
+  validationConfig,
+} from './config';
 import { DatabaseModule, RedisModule } from './infrastructure';
 import { AdminModule } from './modules/admin/admin.module';
 import { AiModule } from './modules/ai/ai.module';
@@ -56,6 +61,48 @@ const featureModules = [
         JWT_SECRET: Joi.string().optional(),
         JWT_EXPIRATION: Joi.string().default('24h'),
         PAYMENT_SIMULATOR_ENABLED: Joi.boolean().default(false),
+        BLOCKCHAIN_WORKER_ENABLED: Joi.boolean().default(false),
+        BLOCKCHAIN_POLL_INTERVAL_MS: Joi.number()
+          .integer()
+          .min(100)
+          .default(5_000),
+        BLOCKCHAIN_LEASE_DURATION_MS: Joi.number()
+          .integer()
+          .min(1_000)
+          .default(30_000),
+        BLOCKCHAIN_RETRY_BASE_DELAY_MS: Joi.number()
+          .integer()
+          .min(100)
+          .default(5_000),
+        FABRIC_CHANNEL_NAME: Joi.string().default('farm2forkchannel'),
+        FABRIC_CHAINCODE_NAME: Joi.string().default('farm2fork-chaincode'),
+        FABRIC_MSP_ID: Joi.string().default('Org1MSP'),
+        FABRIC_PEER_ENDPOINT: Joi.string().default('localhost:7051'),
+        FABRIC_PEER_HOST_ALIAS: Joi.string().default('peer0.org1.example.com'),
+        FABRIC_TLS_ROOT_CERT_PATH: Joi.string().when(
+          'BLOCKCHAIN_WORKER_ENABLED',
+          {
+            is: true,
+            then: Joi.required(),
+            otherwise: Joi.optional(),
+          },
+        ),
+        FABRIC_IDENTITY_CERT_PATH: Joi.string().when(
+          'BLOCKCHAIN_WORKER_ENABLED',
+          {
+            is: true,
+            then: Joi.required(),
+            otherwise: Joi.optional(),
+          },
+        ),
+        FABRIC_IDENTITY_KEY_PATH: Joi.string().when(
+          'BLOCKCHAIN_WORKER_ENABLED',
+          {
+            is: true,
+            then: Joi.required(),
+            otherwise: Joi.optional(),
+          },
+        ),
         SWAGGER_ENABLED: Joi.boolean().default(true),
         SWAGGER_PATH: Joi.string().default('api/docs'),
       }),
@@ -63,7 +110,7 @@ const featureModules = [
         allowUnknown: true,
         abortEarly: false,
       },
-      load: [appConfig, swaggerConfig, validationConfig],
+      load: [appConfig, blockchainConfig, swaggerConfig, validationConfig],
     }),
     ...(shouldLoadInfrastructure
       ? [DatabaseModule, RedisModule, ...featureModules]

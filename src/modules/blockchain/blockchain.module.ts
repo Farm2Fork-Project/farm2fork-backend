@@ -4,10 +4,19 @@ import {
   BlockchainTransaction,
   BlockchainTransactionSchema,
 } from './schemas/blockchain-transaction.schema';
+import {
+  FABRIC_GATEWAY_CLIENT,
+  FABRIC_GATEWAY_RUNTIME,
+} from './interfaces/fabric-gateway-client.interface';
+import { FabricGatewayService } from './fabric-gateway.service';
+import { FabricGatewayRuntimeService } from './fabric-gateway.runtime';
+import { BlockchainOutboxWorker } from './blockchain-outbox.worker';
 
 /**
  * BlockchainModule (EP-03). Registers the blockchain_transactions data layer.
- * Hyperledger Fabric SDK calls and async retry logic arrive in Sprint 4.
+ * The production Fabric Gateway client is registered here. The worker that
+ * consumes records is deliberately separate so disabled deployments never
+ * attempt Fabric I/O.
  */
 @Module({
   imports: [
@@ -15,6 +24,16 @@ import {
       { name: BlockchainTransaction.name, schema: BlockchainTransactionSchema },
     ]),
   ],
-  exports: [MongooseModule],
+  providers: [
+    FabricGatewayRuntimeService,
+    {
+      provide: FABRIC_GATEWAY_RUNTIME,
+      useExisting: FabricGatewayRuntimeService,
+    },
+    FabricGatewayService,
+    { provide: FABRIC_GATEWAY_CLIENT, useExisting: FabricGatewayService },
+    BlockchainOutboxWorker,
+  ],
+  exports: [MongooseModule, FABRIC_GATEWAY_CLIENT, BlockchainOutboxWorker],
 })
 export class BlockchainModule {}

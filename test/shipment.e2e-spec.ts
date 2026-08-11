@@ -17,6 +17,7 @@ import {
   BlockchainTransaction,
   BlockchainTransactionDocument,
   BlockchainTransactionSchema,
+  BlockchainTxStatus,
   BlockchainTxType,
 } from '../src/modules/blockchain/schemas/blockchain-transaction.schema';
 import {
@@ -107,6 +108,38 @@ describe('TransportService self-claim transaction integration', () => {
     });
   });
 
+  it('records one pending shipment event per distinct product in a claimed order', async () => {
+    const productA = new Types.ObjectId();
+    const productB = new Types.ObjectId();
+    const { order } = await createClaimableOrder([
+      productA,
+      productA,
+      productB,
+    ]);
+
+    await service.claim(order.id, new Types.ObjectId().toHexString());
+
+    const shipment = await shipmentModel.findOne({ orderId: order._id }).exec();
+    expect(shipment).not.toBeNull();
+    const events = await blockchainModel
+      .find({
+        referenceId: shipment!._id,
+        type: BlockchainTxType.SupplyChainEvent,
+        status: BlockchainTxStatus.Pending,
+      })
+      .exec();
+    expect(events).toHaveLength(2);
+    expect(events.map((event) => event.referenceId.toHexString())).toEqual([
+      shipment!._id.toHexString(),
+      shipment!._id.toHexString(),
+    ]);
+    expect(
+      events
+        .map((event) => event.payload.supplyChain?.productId?.toHexString())
+        .sort(),
+    ).toEqual([productA.toHexString(), productB.toHexString()].sort());
+  });
+
   it('converts a duplicate shipment key error into a delivery conflict', async () => {
     const { order } = await createClaimableOrder();
     const existingTransporter = new Types.ObjectId();
@@ -134,7 +167,9 @@ describe('TransportService self-claim transaction integration', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
-  async function createClaimableOrder(): Promise<{ order: OrderDocument }> {
+  async function createClaimableOrder(
+    productIds = [new Types.ObjectId()],
+  ): Promise<{ order: OrderDocument }> {
     const buyerId = new Types.ObjectId();
     const farmerId = new Types.ObjectId();
     await farmerProfileModel.create({
@@ -150,16 +185,14 @@ describe('TransportService self-claim transaction integration', () => {
     const order = await orderModel.create({
       buyerId,
       farmerId,
-      items: [
-        {
-          productId: new Types.ObjectId(),
-          farmerId,
-          productName: 'Integration tomatoes',
-          quantity: 2,
-          unitPrice: 100,
-          subtotal: 200,
-        },
-      ],
+      items: productIds.map((productId, index) => ({
+        productId,
+        farmerId,
+        productName: `Integration product ${index + 1}`,
+        quantity: 2,
+        unitPrice: 100,
+        subtotal: 200,
+      })),
       totalAmount: 200,
       platformFeePercent: 5,
       platformFeeAmount: 10,

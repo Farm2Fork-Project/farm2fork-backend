@@ -16,6 +16,35 @@ services:
       - .:/app
       - /app/node_modules
 
+  backend-worker:
+    build:
+      context: .
+      target: development
+    container_name: f2f-worker
+    command: pnpm start:worker:dev
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      BLOCKCHAIN_WORKER_ENABLED: 'true'
+      FABRIC_CHANNEL_NAME: ${FABRIC_CHANNEL_NAME:-farm2forkchannel}
+      FABRIC_CHAINCODE_NAME: ${FABRIC_CHAINCODE_NAME:-farm2fork-chaincode}
+      FABRIC_MSP_ID: ${FABRIC_MSP_ID:-Farm2ForkMSP}
+      FABRIC_PEER_ENDPOINT: ${FABRIC_PEER_ENDPOINT:-peer0.farm2fork.com:7051}
+      FABRIC_PEER_HOST_ALIAS: ${FABRIC_PEER_HOST_ALIAS:-peer0.farm2fork.com}
+      FABRIC_TLS_ROOT_CERT_PATH: /fabric/crypto/peerOrganizations/farm2fork.com/peers/peer0.farm2fork.com/tls/ca.crt
+      FABRIC_IDENTITY_CERT_PATH: /fabric/crypto/peerOrganizations/farm2fork.com/users/Admin@farm2fork.com/msp/signcerts/Admin@farm2fork.com-cert.pem
+      FABRIC_IDENTITY_KEY_PATH: /fabric/crypto/peerOrganizations/farm2fork.com/users/Admin@farm2fork.com/msp/keystore/priv_sk
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - ${FABRIC_CRYPTO_HOST_PATH:?FABRIC_CRYPTO_HOST_PATH is required}:/fabric/crypto:ro
+    networks:
+      - default
+      - fabric
+
   redis:
     image: redis:8.6.3-alpine3.23
     container_name: f2f-redis
@@ -32,3 +61,8 @@ services:
 
 volumes:
   redis_data:
+
+networks:
+  fabric:
+    external: true
+    name: ${FABRIC_DOCKER_NETWORK:-farm2fork-fabric}

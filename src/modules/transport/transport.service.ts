@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
-import { Connection, FilterQuery, Model, Types } from 'mongoose';
+import { ClientSession, Connection, FilterQuery, Model, Types } from 'mongoose';
 import { UserRole } from '../../common/enums/user-role.enum';
 import { RequestUser } from '../../common/guards/roles.guard';
 import {
@@ -179,27 +179,14 @@ export class TransportService {
           { session },
         );
 
-        await this.blockchainModel.create(
-          [
-            {
-              type: BlockchainTxType.SupplyChainEvent,
-              referenceId: shipment._id,
-              referenceModel: BlockchainReferenceModel.Shipment,
-              payload: {
-                payment: null,
-                supplyChain: {
-                  farmerId: order.farmerId,
-                  eventType: 'shipment_assigned',
-                  location: `${pickupAddress.city}, ${pickupAddress.province}`,
-                  actorId: transporterObjectId,
-                  actorRole: UserRole.Transporter,
-                  timestamp: now,
-                },
-              },
-              status: BlockchainTxStatus.Pending,
-            },
-          ],
-          { session },
+        await this.createShipmentSupplyChainEvents(
+          order,
+          shipment,
+          'shipment_assigned',
+          `${pickupAddress.city}, ${pickupAddress.province}`,
+          transporterObjectId,
+          now,
+          session,
         );
 
         order.shipmentId = shipment._id;
@@ -286,27 +273,14 @@ export class TransportService {
           shipment.actualDelivery = now;
         }
 
-        await this.blockchainModel.create(
-          [
-            {
-              type: BlockchainTxType.SupplyChainEvent,
-              referenceId: shipment._id,
-              referenceModel: BlockchainReferenceModel.Shipment,
-              payload: {
-                payment: null,
-                supplyChain: {
-                  farmerId: order.farmerId,
-                  eventType: `shipment_${dto.status}`,
-                  location: this.eventLocation(shipment, dto.status),
-                  actorId: transporterObjectId,
-                  actorRole: UserRole.Transporter,
-                  timestamp: now,
-                },
-              },
-              status: BlockchainTxStatus.Pending,
-            },
-          ],
-          { session },
+        await this.createShipmentSupplyChainEvents(
+          order,
+          shipment,
+          `shipment_${dto.status}`,
+          this.eventLocation(shipment, dto.status),
+          transporterObjectId,
+          now,
+          session,
         );
         await Promise.all([
           shipment.save({ session }),
@@ -382,6 +356,47 @@ export class TransportService {
         ? shipment.deliveryAddress
         : shipment.pickupAddress;
     return [address?.city, address?.province].filter(Boolean).join(', ');
+  }
+
+  private async createShipmentSupplyChainEvents(
+    order: OrderDocument,
+    shipment: ShipmentDocument,
+    eventType: string,
+    location: string,
+    actorId: Types.ObjectId,
+    timestamp: Date,
+    session: ClientSession,
+  ): Promise<void> {
+    const productIds = [
+      ...new Map(
+        order.items.map((item) => [
+          item.productId.toHexString(),
+          item.productId,
+        ]),
+      ).values(),
+    ];
+
+    await this.blockchainModel.create(
+      productIds.map((productId) => ({
+        type: BlockchainTxType.SupplyChainEvent,
+        referenceId: shipment._id,
+        referenceModel: BlockchainReferenceModel.Shipment,
+        payload: {
+          payment: null,
+          supplyChain: {
+            productId,
+            farmerId: order.farmerId,
+            eventType,
+            location,
+            actorId,
+            actorRole: UserRole.Transporter,
+            timestamp,
+          },
+        },
+        status: BlockchainTxStatus.Pending,
+      })),
+      { session, ordered: true },
+    );
   }
 
   private isDuplicateKeyError(error: unknown): boolean {
