@@ -53,4 +53,24 @@ One explicitly approved, test-only payment document was inserted directly into
 used. The worker marked it `confirmed` with Fabric commit-status block `6`,
 and a separate `GetTransactionByLedgerKey` query returned the immutable
 `fabric-smoke` payment record. The normal payment/shipment-flow smoke and
-concurrent-lease/existing-ledger-key e2e tests remain open.
+full backend e2e suite remain open.
+
+## Automated outbox verification
+
+The focused replica-set suite covers two workers attempting the same pending
+record concurrently and recovery when Fabric already contains the immutable
+ledger key. It passed on 2026-08-11:
+
+```bash
+CI=true pnpm test:e2e -- --runInBand --testPathPattern blockchain-outbox
+```
+
+The backend unit suite (`84` tests) and production build also passed with:
+
+```bash
+CI=true pnpm exec jest --runInBand
+CI=true pnpm run build
+```
+
+The broader backend e2e suite remains unverified because Jest currently has an
+ESM runtime conflict when it loads the Fabric Gateway dependency.
