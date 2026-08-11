@@ -119,7 +119,7 @@ export class PaymentController {
   })
   @ApiParam({ name: 'id', description: 'Payment id' })
   @ApiOkResponse({ type: PaymentResponseDto })
-  refund(@Param('id') id: string): PaymentResponseDto {
+  refund(@Param('id') id: string): Promise<PaymentResponseDto> {
     return this.paymentService.refund(id);
   }
 }

@@ -259,12 +259,23 @@ export class PaymentService {
     );
   }
 
-  refund(id: string): PaymentResponseDto {
-    return this.samplePayment({
-      id,
-      status: PaymentStatus.Refunded,
-      refundedAt: new Date().toISOString(),
-    });
+  async refund(id: string): Promise<PaymentResponseDto> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException('Payment not found');
+    }
+    const payment = await this.paymentModel.findById(id).exec();
+    if (!payment) throw new NotFoundException('Payment not found');
+    if (payment.status === PaymentStatus.Refunded) {
+      return this.toResponse(payment);
+    }
+    if (payment.status !== PaymentStatus.Success) {
+      throw new BadRequestException('Only successful payments can be refunded');
+    }
+
+    payment.status = PaymentStatus.Refunded;
+    payment.refundedAt = new Date();
+    await payment.save();
+    return this.toResponse(payment);
   }
 
   // --- internals -------------------------------------------------------------
@@ -282,24 +293,6 @@ export class PaymentService {
       filter._id = { $in: [] };
     }
     return filter;
-  }
-
-  private samplePayment(
-    overrides: Partial<PaymentResponseDto> = {},
-  ): PaymentResponseDto {
-    const now = new Date().toISOString();
-    const base: PaymentResponseDto = {
-      id: '6a2fe77bb77795516febc600',
-      orderId: '6a2fe77bb77795516febc500',
-      buyerId: '6a2fe77bb77795516febc222',
-      amount: 1260,
-      currency: 'PKR',
-      gateway: PaymentGateway.JazzCash,
-      status: PaymentStatus.Pending,
-      createdAt: now,
-      updatedAt: now,
-    };
-    return { ...base, ...overrides };
   }
 
   private toResponse(payment: PaymentDocument): PaymentResponseDto {

@@ -339,6 +339,30 @@ describe('PaymentService', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  it('persists an admin refund without changing inventory', async () => {
+    const payment = makePayment({
+      id: new Types.ObjectId().toHexString(),
+      status: PaymentStatus.Success,
+    });
+    payment.save.mockResolvedValue(payment);
+    paymentModel.findById.mockReturnValue(query(payment));
+
+    const result = await service.refund(payment.id);
+
+    expect(result.status).toBe(PaymentStatus.Refunded);
+    expect(payment.refundedAt).toBeInstanceOf(Date);
+    expect(payment.save).toHaveBeenCalledTimes(1);
+    expect(productModel.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('does not refund a payment that was never successful', async () => {
+    paymentModel.findById.mockReturnValue(query(makePayment()));
+
+    await expect(service.refund('66a2fe77bb77795516febc77')).rejects.toThrow(
+      'Only successful payments can be refunded',
+    );
+  });
+
   it('does not allow simulated settlement when the simulator is disabled', async () => {
     config.get.mockReturnValue(false);
 
