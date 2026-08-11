@@ -13,8 +13,13 @@ bash scripts/create-channel.sh
 bash scripts/deploy-chaincode.sh
 
 cd ../farm2fork-backend
+DATABASE_URL='<Atlas connection URI>' \
+FABRIC_CRYPTO_HOST_PATH='../farm2fork-blockchain/network/organizations' \
 docker compose --env-file .env.example config
-docker compose up backend-worker redis
+
+DATABASE_URL='<Atlas connection URI>' \
+FABRIC_CRYPTO_HOST_PATH='../farm2fork-blockchain/network/organizations' \
+docker compose --env-file .env.example up backend-worker redis
 ```
 
 The worker requires a real Atlas `DATABASE_URL`; the value in `.env.example`
@@ -29,3 +34,6 @@ Compose service sets certificate and key paths beneath `/fabric/crypto`.
 
 `FABRIC_DOCKER_NETWORK` defaults to `farm2fork-fabric`; set it only if the
 blockchain network uses a different external Docker network name.
+
+The local Fabric defaults are channel `farm2forkchannel` and chaincode
+`farm2fork-chaincode`.
