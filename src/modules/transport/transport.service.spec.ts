@@ -29,6 +29,8 @@ const farmerId = '66a2fe77bb77795516febc51';
 const transporterId = '66a2fe77bb77795516febc52';
 const otherTransporterId = '66a2fe77bb77795516febc53';
 const buyerId = '66a2fe77bb77795516febc55';
+const productAId = '66a2fe77bb77795516febc56';
+const productBId = '66a2fe77bb77795516febc57';
 
 const makeOrder = (overrides: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(orderId),
@@ -36,7 +38,10 @@ const makeOrder = (overrides: Record<string, unknown> = {}) => ({
   buyerId: new Types.ObjectId(buyerId),
   farmerId: new Types.ObjectId(farmerId),
   status: OrderStatus.Paid,
-  items: [{ productName: 'Tomatoes' }, { productName: 'Okra' }],
+  items: [
+    { productId: new Types.ObjectId(productAId), productName: 'Tomatoes' },
+    { productId: new Types.ObjectId(productAId), productName: 'Tomatoes' },
+  ],
   shippingAddress: {
     street: '21 Market Road',
     city: 'Lahore',
@@ -243,8 +248,54 @@ describe('TransportService', () => {
           }),
         }),
       ],
-      { session },
+      { session, ordered: true },
     );
+  });
+
+  it('records one assigned shipment event for each distinct ordered product', async () => {
+    const order = makeOrder({
+      items: [
+        { productId: new Types.ObjectId(productAId), productName: 'Tomatoes' },
+        { productId: new Types.ObjectId(productAId), productName: 'Tomatoes' },
+        { productId: new Types.ObjectId(productBId), productName: 'Okra' },
+      ],
+    });
+    const shipment = makeShipment({ orderId: order._id });
+    order.save.mockResolvedValue(order);
+    orderModel.findOne.mockReturnValue(transactionQuery(order));
+    farmerProfileModel.findOne.mockReturnValue(
+      transactionQuery(makeFarmProfile()),
+    );
+    orderModel.findOneAndUpdate.mockReturnValue(transactionQuery(order));
+    shipmentModel.create.mockResolvedValue([shipment]);
+    blockchainModel.create.mockResolvedValue([{ _id: new Types.ObjectId() }]);
+
+    await service.claim(orderId, transporterId);
+
+    expect(blockchainModel.create).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          referenceId: shipment._id,
+          payload: expect.objectContaining({
+            supplyChain: expect.objectContaining({
+              productId: new Types.ObjectId(productAId),
+              eventType: 'shipment_assigned',
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          referenceId: shipment._id,
+          payload: expect.objectContaining({
+            supplyChain: expect.objectContaining({
+              productId: new Types.ObjectId(productBId),
+              eventType: 'shipment_assigned',
+            }),
+          }),
+        }),
+      ]),
+      { session, ordered: true },
+    );
+    expect(blockchainModel.create.mock.calls[0][0]).toHaveLength(2);
   });
 
   it('returns only shipments belonging to the requesting buyer orders', async () => {
@@ -332,7 +383,55 @@ describe('TransportService', () => {
           }),
         }),
       ],
-      { session },
+      { session, ordered: true },
+    );
+  });
+
+  it('records one status-transition event for each distinct ordered product', async () => {
+    const shipment = makeShipment();
+    const order = makeOrder({
+      status: OrderStatus.Processing,
+      items: [
+        { productId: new Types.ObjectId(productAId), productName: 'Tomatoes' },
+        { productId: new Types.ObjectId(productAId), productName: 'Tomatoes' },
+        { productId: new Types.ObjectId(productBId), productName: 'Okra' },
+      ],
+    });
+    shipment.save.mockResolvedValue(shipment);
+    order.save.mockResolvedValue(order);
+    shipmentModel.findById.mockReturnValue(transactionQuery(shipment));
+    orderModel.findById.mockReturnValue(transactionQuery(order));
+    blockchainModel.create.mockResolvedValue([{ _id: new Types.ObjectId() }]);
+
+    await service.updateStatus('66a2fe77bb77795516febc56', transporterId, {
+      status: ShipmentStatus.PickedUp,
+      note: 'Collected produce',
+    });
+
+    const records = blockchainModel.create.mock.calls[0][0];
+    expect(records).toHaveLength(2);
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            supplyChain: expect.objectContaining({
+              productId: new Types.ObjectId(productAId),
+              eventType: 'shipment_picked_up',
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            supplyChain: expect.objectContaining({
+              productId: new Types.ObjectId(productBId),
+              eventType: 'shipment_picked_up',
+            }),
+          }),
+        }),
+      ]),
+    );
+    expect(records[0].payload.supplyChain.timestamp).toBe(
+      records[1].payload.supplyChain.timestamp,
     );
   });
 });
