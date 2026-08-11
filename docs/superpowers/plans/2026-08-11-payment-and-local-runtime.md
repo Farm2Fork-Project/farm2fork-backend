@@ -456,7 +456,7 @@ Run:
 docker compose --env-file .env.example config
 pnpm run build
 pnpm test
-pnpm test:e2e -- --runInBand
+pnpm test:e2e --runInBand
 ```
 
 Expected: all commands PASS. If Atlas credentials are unavailable, do not run `docker compose up`; record that manual Atlas smoke verification remains open.
