@@ -8,6 +8,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { ApiErrorResponses } from '../../common/decorators/api-error-responses.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
@@ -25,12 +26,12 @@ import {
 } from './dto';
 
 @ApiTags('Payments')
-@ApiBearerAuth('JWT-auth')
 @Controller('payments')
 export class PaymentController {
   constructor(private readonly paymentService: PaymentService) {}
 
   @Post()
+  @ApiBearerAuth('JWT-auth')
   @Roles(UserRole.Buyer)
   @ApiOperation({
     summary: 'Initiate payment for an order (US-07)',
@@ -38,6 +39,7 @@ export class PaymentController {
       'Buyer only. Creates or resumes one persisted payment for an owned pending order.',
   })
   @ApiCreatedResponse({ type: InitiatePaymentResponseDto })
+  @ApiErrorResponses(400, 401, 403, 404)
   initiate(
     @CurrentUser() user: RequestUser,
     @Body() dto: CreatePaymentDto,
@@ -46,12 +48,14 @@ export class PaymentController {
   }
 
   @Get()
+  @ApiBearerAuth('JWT-auth')
   @Roles(UserRole.Buyer, UserRole.Admin)
   @ApiOperation({
     summary: 'List payments',
     description: 'Buyer sees only their own payments; admin sees all.',
   })
   @ApiOkResponse({ type: PaymentListResponseDto })
+  @ApiErrorResponses(400, 401, 403)
   findAll(
     @CurrentUser() user: RequestUser,
     @Query() query: QueryPaymentDto,
@@ -60,6 +64,7 @@ export class PaymentController {
   }
 
   @Get(':id')
+  @ApiBearerAuth('JWT-auth')
   @Roles(UserRole.Buyer, UserRole.Admin)
   @ApiOperation({
     summary: 'Get payment status',
@@ -67,6 +72,7 @@ export class PaymentController {
   })
   @ApiParam({ name: 'id', description: 'Payment id' })
   @ApiOkResponse({ type: PaymentResponseDto })
+  @ApiErrorResponses(401, 403, 404)
   findOne(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
@@ -82,11 +88,7 @@ export class PaymentController {
       'Reserved for JazzCash/Stripe callbacks. It returns 501 until provider-specific signature verification is implemented.',
   })
   @ApiParam({ name: 'gateway', enum: PaymentGateway })
-  @ApiOkResponse({
-    schema: {
-      example: { received: true, gateway: 'jazzcash', status: 'success' },
-    },
-  })
+  @ApiErrorResponses(400, 501)
   webhook(
     @Param('gateway') gateway: PaymentGateway,
     @Body() dto: PaymentWebhookDto,
@@ -95,6 +97,7 @@ export class PaymentController {
   }
 
   @Post(':id/simulate')
+  @ApiBearerAuth('JWT-auth')
   @Roles(UserRole.Buyer)
   @ApiOperation({
     summary: 'Settle a simulated payment in local development',
@@ -103,6 +106,7 @@ export class PaymentController {
   })
   @ApiParam({ name: 'id', description: 'Payment id' })
   @ApiOkResponse({ type: PaymentResponseDto })
+  @ApiErrorResponses(400, 401, 403, 404)
   simulate(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
@@ -112,6 +116,7 @@ export class PaymentController {
   }
 
   @Post(':id/refund')
+  @ApiBearerAuth('JWT-auth')
   @Roles(UserRole.Admin)
   @ApiOperation({
     summary: 'Refund a payment',
@@ -119,6 +124,7 @@ export class PaymentController {
   })
   @ApiParam({ name: 'id', description: 'Payment id' })
   @ApiOkResponse({ type: PaymentResponseDto })
+  @ApiErrorResponses(400, 401, 403, 404)
   refund(@Param('id') id: string): Promise<PaymentResponseDto> {
     return this.paymentService.refund(id);
   }

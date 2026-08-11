@@ -5,8 +5,9 @@ import {
   BadRequestException,
   ValidationError,
 } from '@nestjs/common';
-import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { createSwaggerDocument } from './swagger-document';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -62,34 +63,7 @@ async function bootstrap() {
 
   // Swagger setup
   if (swaggerEnabled) {
-    const config = new DocumentBuilder()
-      .setTitle('Farm2Fork API')
-      .setDescription(
-        'Farm2Fork API Documentation - Quality produce direct from farms',
-      )
-      .setVersion(apiVersion)
-      .addBearerAuth(
-        {
-          type: 'http',
-          scheme: 'bearer',
-          bearerFormat: 'JWT',
-          description: 'Enter JWT token',
-        },
-        'JWT-auth',
-      )
-      .addServer(`http://localhost:${port}`, 'Local Development')
-      .addServer(`https://api.farm2fork.com`, 'Production')
-      .addTag('Health', 'Application health check endpoints')
-      .addTag(
-        'Auth',
-        'Registration, login, email verification and password reset',
-      )
-      .addTag('Marketplace', 'Product listings, search, filtering and QR codes')
-      .addTag('Orders', 'Order placement, listing and cancellation')
-      .addTag('Payments', 'Payment initiation, gateway callbacks and refunds')
-      .build();
-
-    const document = SwaggerModule.createDocument(app, config);
+    const document = createSwaggerDocument(app, port, apiVersion);
 
     SwaggerModule.setup(swaggerPath, app, document, {
       swaggerOptions: {

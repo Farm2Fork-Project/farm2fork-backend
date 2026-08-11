@@ -17,6 +17,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { ApiErrorResponses } from '../../common/decorators/api-error-responses.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
 import type { RequestUser } from '../../common/guards/roles.guard';
@@ -50,6 +51,7 @@ export class MarketplaceController {
     description: 'Farmer only. Generates a traceability QR code on creation.',
   })
   @ApiCreatedResponse({ type: ProductResponseDto })
+  @ApiErrorResponses(400, 401, 403)
   create(
     @CurrentUser() user: RequestUser,
     @Body() dto: CreateProductDto,
@@ -65,6 +67,7 @@ export class MarketplaceController {
       'Authenticated farmer, buyer, transporter or admin. Supports text search, category/unit/grade/status filters, price range, sorting and pagination.',
   })
   @ApiOkResponse({ type: ProductListResponseDto })
+  @ApiErrorResponses(400, 401, 403)
   findAll(@Query() query: QueryProductDto): Promise<ProductListResponseDto> {
     return this.marketplaceService.findAll(query);
   }
@@ -76,6 +79,7 @@ export class MarketplaceController {
     description: 'Farmer only.',
   })
   @ApiOkResponse({ type: ProductListResponseDto })
+  @ApiErrorResponses(400, 401, 403)
   findMine(
     @CurrentUser() user: RequestUser,
     @Query() query: QueryProductDto,
@@ -88,6 +92,7 @@ export class MarketplaceController {
   @ApiOperation({ summary: 'Get a single product by id' })
   @ApiParam({ name: 'id', description: 'Product id' })
   @ApiOkResponse({ type: ProductResponseDto })
+  @ApiErrorResponses(401, 403, 404)
   findOne(@Param('id') id: string): Promise<ProductResponseDto> {
     return this.marketplaceService.findOne(id);
   }
@@ -100,6 +105,7 @@ export class MarketplaceController {
   })
   @ApiParam({ name: 'id', description: 'Product id' })
   @ApiOkResponse({ type: ProductQrResponseDto })
+  @ApiErrorResponses(401, 403, 404)
   getQr(@Param('id') id: string): Promise<ProductQrResponseDto> {
     return this.marketplaceService.getQr(id);
   }
@@ -112,6 +118,7 @@ export class MarketplaceController {
   })
   @ApiParam({ name: 'id', description: 'Product id' })
   @ApiOkResponse({ type: ProductResponseDto })
+  @ApiErrorResponses(400, 401, 403, 404)
   update(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
@@ -132,6 +139,7 @@ export class MarketplaceController {
       example: { id: '6a2fe77bb77795516febc287', deleted: true },
     },
   })
+  @ApiErrorResponses(401, 403, 404)
   remove(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,

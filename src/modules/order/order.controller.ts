@@ -16,6 +16,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { ApiErrorResponses } from '../../common/decorators/api-error-responses.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
 import type { RequestUser } from '../../common/guards/roles.guard';
@@ -41,6 +42,7 @@ export class OrderController {
       'Buyer only. All items must belong to one farmer (One-Order-One-Farmer §6.1); a mixed-farmer request is rejected with 400. The platform fee is snapshotted onto the order (§6.2).',
   })
   @ApiCreatedResponse({ type: OrderResponseDto })
+  @ApiErrorResponses(400, 401, 403)
   create(
     @CurrentUser() user: RequestUser,
     @Body() dto: CreateOrderDto,
@@ -56,6 +58,7 @@ export class OrderController {
       'Buyer/farmer/transporter see only their own orders; admin sees all and may filter by buyerId/farmerId.',
   })
   @ApiOkResponse({ type: OrderListResponseDto })
+  @ApiErrorResponses(400, 401, 403)
   findAll(
     @CurrentUser() user: RequestUser,
     @Query() query: QueryOrderDto,
@@ -71,6 +74,7 @@ export class OrderController {
   })
   @ApiParam({ name: 'id', description: 'Order id' })
   @ApiOkResponse({ type: OrderResponseDto })
+  @ApiErrorResponses(401, 403, 404)
   findOne(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
@@ -87,6 +91,7 @@ export class OrderController {
   })
   @ApiParam({ name: 'id', description: 'Order id' })
   @ApiOkResponse({ type: OrderResponseDto })
+  @ApiErrorResponses(400, 401, 403, 404)
   cancel(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
