@@ -206,6 +206,11 @@ export class TransportService {
         await order.save({ session });
         return this.toResponse(shipment);
       });
+    } catch (error) {
+      if (this.isDuplicateKeyError(error)) {
+        throw new ConflictException('Delivery is no longer available');
+      }
+      throw error;
     } finally {
       await session.endSession();
     }
@@ -377,6 +382,15 @@ export class TransportService {
         ? shipment.deliveryAddress
         : shipment.pickupAddress;
     return [address?.city, address?.province].filter(Boolean).join(', ');
+  }
+
+  private isDuplicateKeyError(error: unknown): boolean {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 11000
+    );
   }
 
   private toResponse(shipment: ShipmentDocument): ShipmentResponseDto {
