@@ -9,6 +9,8 @@ export interface FabricLedgerRecord {
   referenceModel: string;
   productId?: string;
   txHash?: string;
+  blockNumber?: number;
+  channelName?: string;
 }
 
 export interface FabricCommit {

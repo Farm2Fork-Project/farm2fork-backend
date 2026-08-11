@@ -10,6 +10,7 @@ import {
 } from './interfaces/fabric-gateway-client.interface';
 import { FabricGatewayService } from './fabric-gateway.service';
 import { FabricGatewayRuntimeService } from './fabric-gateway.runtime';
+import { BlockchainOutboxWorker } from './blockchain-outbox.worker';
 
 /**
  * BlockchainModule (EP-03). Registers the blockchain_transactions data layer.
@@ -31,7 +32,8 @@ import { FabricGatewayRuntimeService } from './fabric-gateway.runtime';
     },
     FabricGatewayService,
     { provide: FABRIC_GATEWAY_CLIENT, useExisting: FabricGatewayService },
+    BlockchainOutboxWorker,
   ],
-  exports: [MongooseModule, FABRIC_GATEWAY_CLIENT],
+  exports: [MongooseModule, FABRIC_GATEWAY_CLIENT, BlockchainOutboxWorker],
 })
 export class BlockchainModule {}

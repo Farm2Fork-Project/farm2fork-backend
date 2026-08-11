@@ -135,6 +135,27 @@ export class BlockchainTransaction {
   @Prop({ default: 0, min: 0, max: 3 })
   retryCount!: number;
 
+  @Prop({ index: true })
+  nextAttemptAt?: Date;
+
+  @Prop({ index: true })
+  leaseExpiresAt?: Date;
+
+  @Prop()
+  leaseToken?: string;
+
+  @Prop()
+  lastAttemptAt?: Date;
+
+  @Prop()
+  lastErrorCode?: string;
+
+  @Prop()
+  lastErrorMessage?: string;
+
+  @Prop()
+  confirmedAt?: Date;
+
   createdAt!: Date;
 }
 
