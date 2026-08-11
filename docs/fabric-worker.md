@@ -37,3 +37,20 @@ blockchain network uses a different external Docker network name.
 
 The local Fabric defaults are channel `farm2forkchannel` and chaincode
 `farm2fork-chaincode`.
+
+## Verified live boundary
+
+On 2026-08-11, the local worker was verified against the user-provided Atlas
+database and the local Fabric network with this runtime shape:
+
+```bash
+FABRIC_CRYPTO_HOST_PATH='../farm2fork-blockchain/network/organizations' \
+docker compose --env-file .env up -d redis backend-worker
+```
+
+One explicitly approved, test-only payment document was inserted directly into
+`blockchain_transactions`; no user order, payment, shipment, or product was
+used. The worker marked it `confirmed` with Fabric commit-status block `6`,
+and a separate `GetTransactionByLedgerKey` query returned the immutable
+`fabric-smoke` payment record. The normal payment/shipment-flow smoke and
+concurrent-lease/existing-ledger-key e2e tests remain open.
