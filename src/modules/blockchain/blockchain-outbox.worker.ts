@@ -1,4 +1,9 @@
-import { Inject, Injectable } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { randomUUID } from 'node:crypto';
@@ -18,7 +23,9 @@ const MAX_RETRIES = 3;
 const MAX_ERROR_MESSAGE_LENGTH = 500;
 
 @Injectable()
-export class BlockchainOutboxWorker {
+export class BlockchainOutboxWorker implements OnModuleInit, OnModuleDestroy {
+  private pollTimer?: NodeJS.Timeout;
+  private processing = false;
   constructor(
     @InjectModel(BlockchainTransaction.name)
     private readonly model: Model<BlockchainTransactionDocument>,
@@ -26,6 +33,19 @@ export class BlockchainOutboxWorker {
     @Inject(FABRIC_GATEWAY_CLIENT)
     private readonly gateway: FabricGatewayClient,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    if (!this.config.get<boolean>('blockchain.enabled', false)) return;
+
+    const pollIntervalMs = this.config.getOrThrow<number>(
+      'blockchain.pollIntervalMs',
+    );
+    this.pollTimer = setInterval(() => void this.poll(), pollIntervalMs);
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    if (this.pollTimer) clearInterval(this.pollTimer);
+  }
 
   async processNext(now = new Date()): Promise<boolean> {
     const leaseToken = randomUUID();
@@ -72,6 +92,17 @@ export class BlockchainOutboxWorker {
       await this.handleFailure(record, leaseToken, error, now);
     }
     return true;
+  }
+
+  private async poll(): Promise<void> {
+    if (this.processing) return;
+
+    this.processing = true;
+    try {
+      await this.processNext();
+    } finally {
+      this.processing = false;
+    }
   }
 
   private async confirm(

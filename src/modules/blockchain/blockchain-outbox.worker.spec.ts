@@ -20,6 +20,7 @@ describe('BlockchainOutboxWorker', () => {
     submit: jest.fn(),
   };
   const config = {
+    get: jest.fn().mockReturnValue(false),
     getOrThrow: jest.fn(
       (key: string) =>
         ({
@@ -131,6 +132,48 @@ describe('BlockchainOutboxWorker', () => {
         }),
       }),
     );
+  });
+
+  it('starts polling only when the blockchain worker is enabled', async () => {
+    jest.useFakeTimers();
+    const disabledWorker = new BlockchainOutboxWorker(
+      model as never,
+      config,
+      gateway,
+    );
+    const disabledProcessNext = jest
+      .spyOn(disabledWorker, 'processNext')
+      .mockResolvedValue(false);
+
+    await disabledWorker.onModuleInit();
+    await jest.advanceTimersByTimeAsync(10_000);
+    expect(disabledProcessNext).not.toHaveBeenCalled();
+
+    const enabledConfig = {
+      get: jest.fn().mockReturnValue(true),
+      getOrThrow: jest.fn(
+        (key: string) =>
+          ({
+            'blockchain.pollIntervalMs': 5_000,
+            'blockchain.leaseDurationMs': 30_000,
+            'blockchain.retryBaseDelayMs': 5_000,
+          })[key],
+      ),
+    } as unknown as ConfigService;
+    const enabledWorker = new BlockchainOutboxWorker(
+      model as never,
+      enabledConfig,
+      gateway,
+    );
+    const enabledProcessNext = jest
+      .spyOn(enabledWorker, 'processNext')
+      .mockResolvedValue(false);
+
+    await enabledWorker.onModuleInit();
+    await jest.advanceTimersByTimeAsync(5_000);
+    expect(enabledProcessNext).toHaveBeenCalledTimes(1);
+    await enabledWorker.onModuleDestroy();
+    jest.useRealTimers();
   });
 
   function pendingRecord() {
