@@ -46,13 +46,14 @@ native emulator or device during normal development.
 
 ```text
 buyer -> POST /payments -> persisted pending payment
-buyer -> simulated completion -> POST /payments/webhook/simulated
+buyer -> simulated completion -> POST /payments/:id/simulate (authenticated buyer; local-only)
 backend -> idempotent success handling:
   payment pending -> success
   order pending -> paid
   decrement each product's stock exactly once
   create a pending blockchain_transactions record
 backend -> return payment status to mobile
+public gateway webhook -> 501 until provider-specific signature verification exists
 ```
 
 The client is never trusted to set payment success, order status, payable
@@ -64,10 +65,11 @@ and verifies that the authenticated buyer owns the order.
 - A payment is unique per order. A buyer cannot create a second payment for the
   same order.
 - Only a `pending` order can receive a new payment.
-- The simulated webhook identifies a payment with its gateway reference and may
-  be replayed. Replaying the same successful callback returns the settled
-  payment without reapplying stock or creating another blockchain record.
-- A success callback uses a MongoDB transaction to update payment, order, and
+- The authenticated local simulator identifies a payment by its private
+  payment id and may be replayed. Replaying the same successful request returns
+  the settled payment without reapplying stock or creating another blockchain
+  record.
+- A simulated success uses a MongoDB transaction to update payment, order, and
   product stock together. Insufficient stock or an invalid order state fails
   the payment rather than partially changing inventory.
 - Refund behavior stays on the existing admin endpoint. The first slice does
@@ -81,8 +83,11 @@ The existing payment endpoints remain the contract:
 
 - `POST /payments` creates or returns a pending payment for an owned order.
 - `GET /payments` and `GET /payments/:id` return persisted, role-scoped data.
-- `POST /payments/webhook/:gateway` is a controlled simulated callback in this
-  slice and moves a payment to `success` or `failed`.
+- `POST /payments/:id/simulate` is buyer-authenticated and exists only when
+  `PAYMENT_SIMULATOR_ENABLED=true` outside production; it moves a payment to
+  `success` or `failed`.
+- `POST /payments/webhook/:gateway` remains public for a future provider, but
+  returns 501 until provider-specific signature verification is designed.
 
 The mobile checkout creates one order per farmer group as it does today. It then
 initiates one payment per created order, shows pending/success/failed state, and
@@ -97,7 +102,7 @@ updates.
   supports transactions.
 - Mobile tests cover the payment repository/controller success, failure, and
   partial multi-farmer checkout outcomes.
-- `docker compose config`, backend build/tests, Flutter analysis/tests, and a
+- `docker compose --env-file .env.example config`, backend build/tests, Flutter analysis/tests, and a
   manual Atlas-backed Compose smoke test are recorded in the progress tracker.
 
 ## Follow-on Work

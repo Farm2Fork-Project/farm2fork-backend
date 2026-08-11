@@ -162,7 +162,7 @@ expect(paymentModel.create).toHaveBeenCalledWith(
 Run:
 
 ```bash
-pnpm test -- payment.service.spec.ts --runInBand
+pnpm exec jest src/modules/payment/payment.service.spec.ts --runInBand
 ```
 
 Expected: FAIL because the service currently has no injected models or persistence behavior.
@@ -192,7 +192,7 @@ Persist a unique `gatewayRef` with `crypto.randomUUID()`, but return only `payme
 Run:
 
 ```bash
-pnpm test -- payment.service.spec.ts order.service.spec.ts --runInBand
+pnpm exec jest src/modules/payment/payment.service.spec.ts src/modules/order/order.service.spec.ts --runInBand
 ```
 
 Expected: PASS.
@@ -244,7 +244,7 @@ Create an integration test backed by `MongoMemoryReplSet` that creates one pendi
 Run:
 
 ```bash
-pnpm test -- payment.service.spec.ts --runInBand
+pnpm exec jest src/modules/payment/payment.service.spec.ts --runInBand
 ```
 
 Expected: FAIL because settlement and the simulator endpoint do not exist.
@@ -278,7 +278,7 @@ Run:
 
 ```bash
 pnpm add -D mongodb-memory-server
-pnpm test -- payment.service.spec.ts --runInBand
+pnpm exec jest src/modules/payment/payment.service.spec.ts --runInBand
 pnpm test:e2e -- payment.e2e-spec.ts --runInBand
 ```
 
@@ -413,7 +413,7 @@ After every successful checkout order, build the route with `Uri` so multiple id
 ```dart
 final location = Uri(
   path: '/payments',
-  queryParametersAll: {'orderId': result.placed.map((order) => order.id).toList()},
+  queryParameters: {'orderId': result.placed.map((order) => order.id).toList()},
 ).toString();
 if (context.mounted) context.go(location);
 ```
@@ -453,9 +453,9 @@ git commit -m "feat: add simulated mobile payment flow"
 Run:
 
 ```bash
-docker compose config
+docker compose --env-file .env.example config
 pnpm run build
-pnpm test -- --runInBand
+pnpm test
 pnpm test:e2e -- --runInBand
 ```
 
