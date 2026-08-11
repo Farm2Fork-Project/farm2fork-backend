@@ -1,8 +1,21 @@
-import { Injectable } from '@nestjs/common';
-import { Types } from 'mongoose';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { randomUUID } from 'crypto';
+import { Model } from 'mongoose';
 import { RequestUser } from '../../common/guards/roles.guard';
 import { UserRole } from '../../common/enums/user-role.enum';
-import { PaymentGateway, PaymentStatus } from './schemas/payment.schema';
+import { Order, OrderDocument, OrderStatus } from '../order/schemas/order.schema';
+import {
+  Payment,
+  PaymentDocument,
+  PaymentGateway,
+  PaymentStatus,
+} from './schemas/payment.schema';
 import {
   CreatePaymentDto,
   InitiatePaymentResponseDto,
@@ -15,28 +28,57 @@ import {
 /**
  * PaymentService (EP-04).
  *
- * NOTE: returns DTO-shaped MOCK data. Real implementation (Sprint 3) integrates
- * JazzCash/Stripe behind a gateway abstraction, records the payment on the
- * blockchain asynchronously on success (§6.4) and emits notifications (§6.5).
- * `gatewayRef` is never returned to clients (§6.6).
+ * Payment initiation is persisted and always derives its amount from the order.
+ * Gateway settlement, blockchain recording, and notifications are added in
+ * subsequent payment-slice steps. `gatewayRef` never reaches client DTOs.
  */
 @Injectable()
 export class PaymentService {
-  initiate(buyerId: string, dto: CreatePaymentDto): InitiatePaymentResponseDto {
-    const payment = this.samplePayment({
-      id: new Types.ObjectId().toHexString(),
-      orderId: dto.orderId,
-      buyerId,
+  constructor(
+    @InjectModel(Payment.name)
+    private readonly paymentModel: Model<PaymentDocument>,
+    @InjectModel(Order.name)
+    private readonly orderModel: Model<OrderDocument>,
+  ) {}
+
+  async initiate(
+    buyerId: string,
+    dto: CreatePaymentDto,
+  ): Promise<InitiatePaymentResponseDto> {
+    const order = await this.orderModel.findById(dto.orderId).exec();
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.buyerId.toHexString() !== buyerId) {
+      throw new ForbiddenException('You can only pay for your own order');
+    }
+    if (order.status !== OrderStatus.Pending) {
+      throw new BadRequestException('Only pending orders can be paid');
+    }
+
+    const existing = await this.paymentModel
+      .findOne({ orderId: order._id })
+      .exec();
+    if (existing?.status === PaymentStatus.Pending) {
+      return { payment: this.toResponse(existing) };
+    }
+    if (existing) {
+      existing.status = PaymentStatus.Pending;
+      existing.gateway = dto.gateway;
+      existing.gatewayRef = randomUUID();
+      existing.failedAt = undefined;
+      await existing.save();
+      return { payment: this.toResponse(existing) };
+    }
+
+    const payment = await this.paymentModel.create({
+      orderId: order._id,
+      buyerId: order.buyerId,
+      amount: order.grandTotal,
+      currency: 'PKR',
       gateway: dto.gateway,
+      gatewayRef: randomUUID(),
       status: PaymentStatus.Pending,
     });
-
-    return dto.gateway === PaymentGateway.Stripe
-      ? { payment, clientSecret: 'pi_3Q_mock_secret_abc' }
-      : {
-          payment,
-          redirectUrl: `https://sandbox.jazzcash.com.pk/pay/${payment.id}`,
-        };
+    return { payment: this.toResponse(payment) };
   }
 
   findAll(user: RequestUser, query: QueryPaymentDto): PaymentListResponseDto {
@@ -120,5 +162,23 @@ export class PaymentService {
       updatedAt: now,
     };
     return { ...base, ...overrides };
+  }
+
+  private toResponse(payment: PaymentDocument): PaymentResponseDto {
+    return {
+      id: payment.id,
+      orderId: payment.orderId.toHexString(),
+      buyerId: payment.buyerId.toHexString(),
+      amount: payment.amount,
+      currency: payment.currency,
+      gateway: payment.gateway,
+      status: payment.status,
+      blockchainTxId: payment.blockchainTxId?.toHexString(),
+      paidAt: payment.paidAt?.toISOString(),
+      failedAt: payment.failedAt?.toISOString(),
+      refundedAt: payment.refundedAt?.toISOString(),
+      createdAt: payment.createdAt.toISOString(),
+      updatedAt: payment.updatedAt.toISOString(),
+    };
   }
 }

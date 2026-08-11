@@ -34,13 +34,13 @@ export class PaymentController {
   @ApiOperation({
     summary: 'Initiate payment for an order (US-07)',
     description:
-      'Buyer only. Returns a gateway-specific completion hint: JazzCash redirectUrl or Stripe clientSecret.',
+      'Buyer only. Creates or resumes one persisted payment for an owned pending order.',
   })
   @ApiCreatedResponse({ type: InitiatePaymentResponseDto })
   initiate(
     @CurrentUser() user: RequestUser,
     @Body() dto: CreatePaymentDto,
-  ): InitiatePaymentResponseDto {
+  ): Promise<InitiatePaymentResponseDto> {
     return this.paymentService.initiate(user.id, dto);
   }
 
