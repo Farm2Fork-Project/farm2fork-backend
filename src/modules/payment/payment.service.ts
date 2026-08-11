@@ -8,7 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { randomUUID } from 'crypto';
-import { Connection, Model, Types } from 'mongoose';
+import { Connection, FilterQuery, Model, Types } from 'mongoose';
 import {
   BlockchainReferenceModel,
   BlockchainTransaction,
@@ -203,22 +203,48 @@ export class PaymentService {
     }
   }
 
-  findAll(user: RequestUser, query: QueryPaymentDto): PaymentListResponseDto {
-    const scoped = this.sampleCatalog().map((p) =>
-      user.role === UserRole.Admin ? p : { ...p, buyerId: user.id },
-    );
-    const filtered = scoped.filter(
-      (p) =>
-        (!query.status || p.status === query.status) &&
-        (!query.gateway || p.gateway === query.gateway),
-    );
-    return this.paginate(query, filtered);
+  async findAll(
+    user: RequestUser,
+    query: QueryPaymentDto,
+  ): Promise<PaymentListResponseDto> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const filter = this.scopeFilter(user, query);
+    const [payments, total] = await Promise.all([
+      this.paymentModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .exec(),
+      this.paymentModel.countDocuments(filter).exec(),
+    ]);
+
+    return {
+      data: payments.map((payment) => this.toResponse(payment)),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit) || 0,
+    };
   }
 
-  findOne(id: string, user: RequestUser): PaymentResponseDto {
-    const payment = this.samplePayment({ id });
-    if (user.role !== UserRole.Admin) payment.buyerId = user.id;
-    return payment;
+  async findOne(
+    id: string,
+    user: RequestUser,
+  ): Promise<PaymentResponseDto> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException('Payment not found');
+    }
+    const payment = await this.paymentModel.findById(id).exec();
+    if (!payment) throw new NotFoundException('Payment not found');
+    if (
+      user.role !== UserRole.Admin &&
+      payment.buyerId.toHexString() !== user.id
+    ) {
+      throw new ForbiddenException('You do not have access to this payment');
+    }
+    return this.toResponse(payment);
   }
 
   /** Gateway callback - flips the payment to success/failed. */
@@ -241,35 +267,21 @@ export class PaymentService {
     });
   }
 
-  // --- mock helpers ----------------------------------------------------------
+  // --- internals -------------------------------------------------------------
 
-  private paginate(
+  private scopeFilter(
+    user: RequestUser,
     query: QueryPaymentDto,
-    catalog: PaymentResponseDto[],
-  ): PaymentListResponseDto {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 10;
-    const total = 8;
-    return {
-      data: catalog.slice(0, limit),
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    };
-  }
-
-  private sampleCatalog(): PaymentResponseDto[] {
-    return [
-      this.samplePayment({}),
-      this.samplePayment({
-        id: '6a2fe77bb77795516febc601',
-        status: PaymentStatus.Success,
-        gateway: PaymentGateway.Stripe,
-        paidAt: '2026-06-15T12:10:00.000Z',
-        blockchainTxId: '6a2fe77bb77795516febc999',
-      }),
-    ];
+  ): FilterQuery<PaymentDocument> {
+    const filter: FilterQuery<PaymentDocument> = {};
+    if (query.status) filter.status = query.status;
+    if (query.gateway) filter.gateway = query.gateway;
+    if (user.role === UserRole.Buyer) {
+      filter.buyerId = new Types.ObjectId(user.id);
+    } else if (user.role !== UserRole.Admin) {
+      filter._id = { $in: [] };
+    }
+    return filter;
   }
 
   private samplePayment(

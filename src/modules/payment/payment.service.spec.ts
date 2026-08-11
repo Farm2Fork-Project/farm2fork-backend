@@ -1,9 +1,14 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { ForbiddenException, NotImplementedException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  NotFoundException,
+  NotImplementedException,
+} from '@nestjs/common';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Types } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
+import { UserRole } from '../../common/enums/user-role.enum';
 import {
   BlockchainTransaction,
   BlockchainTxStatus,
@@ -56,7 +61,13 @@ const makePayment = (overrides: Record<string, unknown> = {}) => ({
 describe('PaymentService', () => {
   let service: PaymentService;
   let orderModel: { findById: jest.Mock };
-  let paymentModel: { findOne: jest.Mock; create: jest.Mock };
+  let paymentModel: {
+    findOne: jest.Mock;
+    findById: jest.Mock;
+    find: jest.Mock;
+    countDocuments: jest.Mock;
+    create: jest.Mock;
+  };
   let productModel: { updateOne: jest.Mock };
   let blockchainModel: { create: jest.Mock };
   let connection: { startSession: jest.Mock };
@@ -65,7 +76,13 @@ describe('PaymentService', () => {
 
   beforeEach(async () => {
     orderModel = { findById: jest.fn() };
-    paymentModel = { findOne: jest.fn(), create: jest.fn() };
+    paymentModel = {
+      findOne: jest.fn(),
+      findById: jest.fn(),
+      find: jest.fn(),
+      countDocuments: jest.fn(),
+      create: jest.fn(),
+    };
     productModel = { updateOne: jest.fn() };
     blockchainModel = { create: jest.fn() };
     session = {
@@ -277,6 +294,49 @@ describe('PaymentService', () => {
         status: PaymentStatus.Success,
       }),
     ).toThrow(NotImplementedException);
+  });
+
+  it('lists persisted payments scoped to the requesting buyer', async () => {
+    const payment = makePayment({ id: 'persisted-payment' });
+    paymentModel.find.mockReturnValue({
+      sort: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue([payment]),
+    });
+    paymentModel.countDocuments.mockReturnValue(query(1));
+
+    const result = await service.findAll(
+      { id: buyerId, role: UserRole.Buyer },
+      { page: 1, limit: 10, status: PaymentStatus.Pending },
+    );
+
+    expect(result.data.map((item) => item.id)).toEqual(['persisted-payment']);
+    expect(result.total).toBe(1);
+    expect(paymentModel.find).toHaveBeenCalledWith({
+      buyerId: new Types.ObjectId(buyerId),
+      status: PaymentStatus.Pending,
+    });
+  });
+
+  it('does not expose a payment to another buyer', async () => {
+    paymentModel.findById.mockReturnValue(query(makePayment()));
+
+    await expect(
+      service.findOne('66a2fe77bb77795516febc77', {
+        id: otherBuyerId,
+        role: UserRole.Buyer,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('returns not found for an invalid persisted payment id', async () => {
+    await expect(
+      service.findOne('not-an-object-id', {
+        id: buyerId,
+        role: UserRole.Buyer,
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('does not allow simulated settlement when the simulator is disabled', async () => {

@@ -55,7 +55,7 @@ export class PaymentController {
   findAll(
     @CurrentUser() user: RequestUser,
     @Query() query: QueryPaymentDto,
-  ): PaymentListResponseDto {
+  ): Promise<PaymentListResponseDto> {
     return this.paymentService.findAll(user, query);
   }
 
@@ -70,7 +70,7 @@ export class PaymentController {
   findOne(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
-  ): PaymentResponseDto {
+  ): Promise<PaymentResponseDto> {
     return this.paymentService.findOne(id, user);
   }
 
