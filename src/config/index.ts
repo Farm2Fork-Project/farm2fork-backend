@@ -1,5 +1,7 @@
 export { appConfig } from './app.config';
 export type { IAppConfig } from './app.config';
+export { blockchainConfig } from './blockchain.config';
+export type { IBlockchainConfig } from './blockchain.config';
 export { databaseConfig } from './database.config';
 export type { IDatabaseConfig } from './database.config';
 export { swaggerConfig } from './swagger.config';
