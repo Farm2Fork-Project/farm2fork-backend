@@ -4,11 +4,20 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
+import { ConfigService } from '@nestjs/config';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { randomUUID } from 'crypto';
-import { Model } from 'mongoose';
+import { Connection, Model, Types } from 'mongoose';
+import {
+  BlockchainReferenceModel,
+  BlockchainTransaction,
+  BlockchainTransactionDocument,
+  BlockchainTxStatus,
+  BlockchainTxType,
+} from '../blockchain/schemas/blockchain-transaction.schema';
 import { RequestUser } from '../../common/guards/roles.guard';
 import { UserRole } from '../../common/enums/user-role.enum';
+import { Product, ProductDocument } from '../marketplace/schemas/product.schema';
 import { Order, OrderDocument, OrderStatus } from '../order/schemas/order.schema';
 import {
   Payment,
@@ -39,6 +48,13 @@ export class PaymentService {
     private readonly paymentModel: Model<PaymentDocument>,
     @InjectModel(Order.name)
     private readonly orderModel: Model<OrderDocument>,
+    @InjectModel(Product.name)
+    private readonly productModel: Model<ProductDocument>,
+    @InjectModel(BlockchainTransaction.name)
+    private readonly blockchainModel: Model<BlockchainTransactionDocument>,
+    @InjectConnection()
+    private readonly connection: Connection,
+    private readonly config: ConfigService,
   ) {}
 
   async initiate(
@@ -79,6 +95,100 @@ export class PaymentService {
       status: PaymentStatus.Pending,
     });
     return { payment: this.toResponse(payment) };
+  }
+
+  async simulate(
+    id: string,
+    buyerId: string,
+    status: PaymentStatus,
+  ): Promise<PaymentResponseDto> {
+    if (
+      this.config.get<boolean>('PAYMENT_SIMULATOR_ENABLED') !== true ||
+      this.config.get<string>('NODE_ENV') === 'production'
+    ) {
+      throw new NotFoundException('Payment simulator is not enabled');
+    }
+
+    const session = await this.connection.startSession();
+    try {
+      return await session.withTransaction(async () => {
+        const payment = await this.paymentModel
+          .findOne({ _id: id, buyerId: new Types.ObjectId(buyerId) })
+          .session(session)
+          .exec();
+        if (!payment) throw new NotFoundException('Payment not found');
+        if (payment.status === PaymentStatus.Success) {
+          return this.toResponse(payment);
+        }
+        if (payment.status !== PaymentStatus.Pending) {
+          throw new BadRequestException('Payment cannot be settled');
+        }
+        if (status === PaymentStatus.Failed) {
+          payment.status = PaymentStatus.Failed;
+          payment.failedAt = new Date();
+          await payment.save({ session });
+          return this.toResponse(payment);
+        }
+        if (status !== PaymentStatus.Success) {
+          throw new BadRequestException('Unsupported payment outcome');
+        }
+
+        const order = await this.orderModel
+          .findById(payment.orderId)
+          .session(session)
+          .exec();
+        if (!order || order.status !== OrderStatus.Pending) {
+          throw new BadRequestException('Only pending orders can be settled');
+        }
+
+        for (const item of order.items) {
+          const update = await this.productModel
+            .updateOne(
+              { _id: item.productId, quantity: { $gte: item.quantity } },
+              { $inc: { quantity: -item.quantity } },
+              { session },
+            )
+            .exec();
+          if (update.modifiedCount !== 1) {
+            throw new BadRequestException('Insufficient stock to settle order');
+          }
+        }
+
+        const [blockchainRecord] = await this.blockchainModel.create(
+          [
+            {
+              type: BlockchainTxType.Payment,
+              referenceId: payment._id,
+              referenceModel: BlockchainReferenceModel.Payment,
+              payload: {
+                payment: {
+                  orderId: order._id,
+                  buyerId: order.buyerId,
+                  farmerId: order.farmerId,
+                  amount: payment.amount,
+                  currency: payment.currency,
+                  gateway: payment.gateway,
+                  paidAt: new Date(),
+                },
+                supplyChain: null,
+              },
+              status: BlockchainTxStatus.Pending,
+            },
+          ],
+          { session },
+        );
+
+        payment.status = PaymentStatus.Success;
+        payment.paidAt = new Date();
+        payment.blockchainTxId = blockchainRecord._id;
+        order.status = OrderStatus.Paid;
+        order.paymentId = payment._id;
+        await Promise.all([payment.save({ session }), order.save({ session })]);
+        return this.toResponse(payment);
+      });
+    } finally {
+      await session.endSession();
+    }
   }
 
   findAll(user: RequestUser, query: QueryPaymentDto): PaymentListResponseDto {

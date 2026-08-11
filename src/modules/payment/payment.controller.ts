@@ -19,6 +19,7 @@ import {
   InitiatePaymentResponseDto,
   PaymentListResponseDto,
   PaymentResponseDto,
+  SimulatePaymentDto,
   PaymentWebhookDto,
   QueryPaymentDto,
 } from './dto';
@@ -91,6 +92,23 @@ export class PaymentController {
     @Body() dto: PaymentWebhookDto,
   ): { received: boolean; gateway: PaymentGateway; status: string } {
     return this.paymentService.handleWebhook(gateway, dto);
+  }
+
+  @Post(':id/simulate')
+  @Roles(UserRole.Buyer)
+  @ApiOperation({
+    summary: 'Settle a simulated payment in local development',
+    description:
+      'Buyer only. Available only when PAYMENT_SIMULATOR_ENABLED=true outside production.',
+  })
+  @ApiParam({ name: 'id', description: 'Payment id' })
+  @ApiOkResponse({ type: PaymentResponseDto })
+  simulate(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Body() dto: SimulatePaymentDto,
+  ): Promise<PaymentResponseDto> {
+    return this.paymentService.simulate(id, user.id, dto.status);
   }
 
   @Post(':id/refund')

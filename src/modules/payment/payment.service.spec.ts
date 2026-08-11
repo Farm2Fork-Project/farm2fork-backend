@@ -1,13 +1,25 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { ForbiddenException } from '@nestjs/common';
-import { getModelToken } from '@nestjs/mongoose';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Types } from 'mongoose';
+import { ConfigService } from '@nestjs/config';
+import {
+  BlockchainTransaction,
+  BlockchainTxStatus,
+  BlockchainTxType,
+} from '../blockchain/schemas/blockchain-transaction.schema';
+import { Product } from '../marketplace/schemas/product.schema';
 import { Order, OrderStatus } from '../order/schemas/order.schema';
 import { Payment, PaymentGateway, PaymentStatus } from './schemas/payment.schema';
 import { PaymentService } from './payment.service';
 
 const query = <T>(value: T) => ({
+  exec: jest.fn<() => Promise<T>>().mockResolvedValue(value),
+});
+
+const transactionQuery = <T>(value: T) => ({
+  session: jest.fn().mockReturnThis(),
   exec: jest.fn<() => Promise<T>>().mockResolvedValue(value),
 });
 
@@ -42,16 +54,38 @@ describe('PaymentService', () => {
   let service: PaymentService;
   let orderModel: { findById: jest.Mock };
   let paymentModel: { findOne: jest.Mock; create: jest.Mock };
+  let productModel: { updateOne: jest.Mock };
+  let blockchainModel: { create: jest.Mock };
+  let connection: { startSession: jest.Mock };
+  let session: { withTransaction: jest.Mock; endSession: jest.Mock };
+  let config: { get: jest.Mock };
 
   beforeEach(async () => {
     orderModel = { findById: jest.fn() };
     paymentModel = { findOne: jest.fn(), create: jest.fn() };
+    productModel = { updateOne: jest.fn() };
+    blockchainModel = { create: jest.fn() };
+    session = {
+      withTransaction: jest.fn(async (callback: () => Promise<unknown>) =>
+        callback(),
+      ),
+      endSession: jest.fn(),
+    };
+    connection = { startSession: jest.fn().mockResolvedValue(session) };
+    config = { get: jest.fn().mockReturnValue(true) };
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentService,
         { provide: getModelToken(Order.name), useValue: orderModel },
         { provide: getModelToken(Payment.name), useValue: paymentModel },
+        { provide: getModelToken(Product.name), useValue: productModel },
+        {
+          provide: getModelToken(BlockchainTransaction.name),
+          useValue: blockchainModel,
+        },
+        { provide: getConnectionToken(), useValue: connection },
+        { provide: ConfigService, useValue: config },
       ],
     }).compile();
 
@@ -139,5 +173,80 @@ describe('PaymentService', () => {
     expect(failed.failedAt).toBeUndefined();
     expect(failed.save).toHaveBeenCalledTimes(1);
     expect(paymentModel.create).not.toHaveBeenCalled();
+  });
+
+  it('settles a pending payment once with order, stock, and blockchain state', async () => {
+    const productId = new Types.ObjectId();
+    const payment = makePayment({ id: 'payment-to-settle' });
+    payment.save.mockResolvedValue(payment);
+    const order = makeOrder({
+      items: [{ productId, quantity: 2 }],
+      paymentId: undefined,
+      save: jest.fn(),
+    });
+    order.save.mockResolvedValue(order);
+    const blockchainRecord = { _id: new Types.ObjectId() };
+
+    paymentModel.findOne.mockReturnValue(transactionQuery(payment));
+    orderModel.findById.mockReturnValue(transactionQuery(order));
+    productModel.updateOne.mockReturnValue(
+      transactionQuery({ modifiedCount: 1 }),
+    );
+    blockchainModel.create.mockResolvedValue([blockchainRecord]);
+
+    const result = await service.simulate(
+      'payment-to-settle',
+      buyerId,
+      PaymentStatus.Success,
+    );
+
+    expect(result.status).toBe(PaymentStatus.Success);
+    expect(payment.status).toBe(PaymentStatus.Success);
+    expect(order.status).toBe(OrderStatus.Paid);
+    expect(order.paymentId).toEqual(payment._id);
+    expect(productModel.updateOne).toHaveBeenCalledWith(
+      { _id: productId, quantity: { $gte: 2 } },
+      { $inc: { quantity: -2 } },
+      { session },
+    );
+    expect(blockchainModel.create).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          type: BlockchainTxType.Payment,
+          status: BlockchainTxStatus.Pending,
+          referenceId: payment._id,
+        }),
+      ],
+      { session },
+    );
+    expect(session.endSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('records a failed payment without changing stock, order, or blockchain state', async () => {
+    const payment = makePayment({ id: 'payment-to-fail' });
+    payment.save.mockResolvedValue(payment);
+    paymentModel.findOne.mockReturnValue(transactionQuery(payment));
+
+    const result = await service.simulate(
+      'payment-to-fail',
+      buyerId,
+      PaymentStatus.Failed,
+    );
+
+    expect(result.status).toBe(PaymentStatus.Failed);
+    expect(payment.status).toBe(PaymentStatus.Failed);
+    expect(payment.failedAt).toBeInstanceOf(Date);
+    expect(productModel.updateOne).not.toHaveBeenCalled();
+    expect(orderModel.findById).not.toHaveBeenCalled();
+    expect(blockchainModel.create).not.toHaveBeenCalled();
+  });
+
+  it('does not allow simulated settlement when the simulator is disabled', async () => {
+    config.get.mockReturnValue(false);
+
+    await expect(
+      service.simulate('payment-disabled', buyerId, PaymentStatus.Success),
+    ).rejects.toThrow('Payment simulator is not enabled');
+    expect(connection.startSession).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { BlockchainModule } from '../blockchain/blockchain.module';
+import { MarketplaceModule } from '../marketplace/marketplace.module';
 import { OrderModule } from '../order/order.module';
 import { PaymentController } from './payment.controller';
 import { PaymentService } from './payment.service';
@@ -14,6 +16,8 @@ import { Payment, PaymentSchema } from './schemas/payment.schema';
   imports: [
     MongooseModule.forFeature([{ name: Payment.name, schema: PaymentSchema }]),
     OrderModule,
+    MarketplaceModule,
+    BlockchainModule,
   ],
   controllers: [PaymentController],
   providers: [PaymentService],
