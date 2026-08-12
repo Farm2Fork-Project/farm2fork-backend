@@ -2,7 +2,6 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsArray,
-  IsEmail,
   IsEnum,
   IsNotEmpty,
   IsNumber,
@@ -12,106 +11,45 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { IsStrongPassword } from '../../../common/validators/password.validator';
 import { IsValidPhoneNumber } from '../../../common/validators/phone.validator';
 import { BusinessType } from '../schemas/buyer-profile.schema';
 import { VehicleType } from '../schemas/transporter-profile.schema';
+import {
+  BankAccountDetailsDto,
+  BuyerAddressDto,
+  CNIC_REGEX,
+  GeoPointDto,
+} from './register.dto';
 
-/** Pakistani CNIC: 13 digits, optionally formatted as 00000-0000000-0. */
-export const CNIC_REGEX = /^\d{5}-?\d{7}-?\d$/;
-
-export class AccountCredentialsDto {
-  @ApiProperty({ example: 'farmer@example.com' })
-  @IsEmail()
-  email!: string;
-
+/**
+ * A Firebase ID token, obtained by the client from the Firebase SDK after a
+ * Google or email/password sign-in. The backend verifies it before doing
+ * anything else.
+ */
+export class FirebaseAuthDto {
   @ApiProperty({
-    example: 'StrongP@ss1',
-    description:
-      'Min 8 chars with uppercase, lowercase, number and special character',
+    description: 'Firebase ID token (JWT issued by Firebase Auth)',
   })
-  @IsStrongPassword()
-  password!: string;
+  @IsString()
+  @IsNotEmpty()
+  idToken!: string;
+}
 
+/**
+ * First-time onboarding. The email is taken from the verified Firebase token -
+ * never from the body - so it cannot be spoofed. Only self-service roles
+ * (farmer/buyer/transporter) may onboard through these endpoints; admin and
+ * financial_partner are provisioned separately (allowlisted).
+ */
+class FirebaseOnboardDto extends FirebaseAuthDto {
   @ApiPropertyOptional({ example: '+923001234567' })
   @IsOptional()
   @IsValidPhoneNumber()
   phone?: string;
 }
 
-export class GeoPointDto {
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsNumber()
-  lat?: number;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsNumber()
-  lng?: number;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  address?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  city?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  province?: string;
-}
-
-export class BankAccountDetailsDto {
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  bankName?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  accountNumber?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  accountTitle?: string;
-}
-
-export class BuyerAddressDto {
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  label?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  street?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  city?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  province?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  zip?: string;
-}
-
-/** POST /auth/register/farmer */
-export class RegisterFarmerDto extends AccountCredentialsDto {
+/** POST /auth/firebase/onboard/farmer */
+export class FirebaseOnboardFarmerDto extends FirebaseOnboardDto {
   @ApiProperty({ example: 'Green Acres Farm' })
   @IsString()
   @IsNotEmpty()
@@ -146,8 +84,8 @@ export class RegisterFarmerDto extends AccountCredentialsDto {
   bankAccountDetails?: BankAccountDetailsDto;
 }
 
-/** POST /auth/register/buyer */
-export class RegisterBuyerDto extends AccountCredentialsDto {
+/** POST /auth/firebase/onboard/buyer */
+export class FirebaseOnboardBuyerDto extends FirebaseOnboardDto {
   @ApiProperty({ example: 'Fresh Mart' })
   @IsString()
   @IsNotEmpty()
@@ -169,8 +107,8 @@ export class RegisterBuyerDto extends AccountCredentialsDto {
   addresses?: BuyerAddressDto[];
 }
 
-/** POST /auth/register/transporter */
-export class RegisterTransporterDto extends AccountCredentialsDto {
+/** POST /auth/firebase/onboard/transporter */
+export class FirebaseOnboardTransporterDto extends FirebaseOnboardDto {
   @ApiProperty({ enum: VehicleType, example: VehicleType.Van })
   @IsEnum(VehicleType)
   vehicleType!: VehicleType;

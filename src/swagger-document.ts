@@ -26,7 +26,7 @@ export function createSwaggerDocument(
     .addTag('Health', 'Application health check endpoints')
     .addTag(
       'Auth',
-      'Registration, login, email verification and password reset',
+      'Firebase sign-in, onboarding, registration, login, email verification and password reset',
     )
     .addTag('Marketplace', 'Product listings, search, filtering and QR codes')
     .addTag('Orders', 'Order placement, listing and cancellation')

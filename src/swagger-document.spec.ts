@@ -74,6 +74,15 @@ describe('createSwaggerDocument', () => {
     expectPublic(document, '/api/auth/resend-verification', 'post', '200');
     expectPublic(document, '/api/auth/password-reset/request', 'post', '200');
     expectPublic(document, '/api/auth/password-reset/confirm', 'post', '200');
+    expectPublic(document, '/api/auth/firebase', 'post', '200');
+    expectPublic(document, '/api/auth/firebase/onboard/farmer', 'post', '201');
+    expectPublic(document, '/api/auth/firebase/onboard/buyer', 'post', '201');
+    expectPublic(
+      document,
+      '/api/auth/firebase/onboard/transporter',
+      'post',
+      '201',
+    );
     expectPublicError(
       document,
       '/api/payments/webhook/{gateway}',
