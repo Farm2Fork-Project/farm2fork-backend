@@ -30,3 +30,7 @@ serviceAccount*.json
 
 # Local linked worktrees
 .worktrees/
+
+# Local package and TypeScript incremental-build caches
+.pnpm-store/
+*.tsbuildinfo
