@@ -18,7 +18,7 @@ import { BusinessType } from '../schemas/buyer-profile.schema';
 import { VehicleType } from '../schemas/transporter-profile.schema';
 
 /** Pakistani CNIC: 13 digits, optionally formatted as 00000-0000000-0. */
-const CNIC_REGEX = /^\d{5}-?\d{7}-?\d$/;
+export const CNIC_REGEX = /^\d{5}-?\d{7}-?\d$/;
 
 export class AccountCredentialsDto {
   @ApiProperty({ example: 'farmer@example.com' })
@@ -39,7 +39,7 @@ export class AccountCredentialsDto {
   phone?: string;
 }
 
-class GeoPointDto {
+export class GeoPointDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsNumber()
@@ -66,7 +66,7 @@ class GeoPointDto {
   province?: string;
 }
 
-class BankAccountDetailsDto {
+export class BankAccountDetailsDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
@@ -83,7 +83,7 @@ class BankAccountDetailsDto {
   accountTitle?: string;
 }
 
-class BuyerAddressDto {
+export class BuyerAddressDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
