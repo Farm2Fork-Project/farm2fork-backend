@@ -311,6 +311,25 @@ describe('AuthService', () => {
       expect(result.accessToken).toBe('signed.jwt.token');
     });
 
+    it('rejects an unverified Firebase email before linking a legacy account', async () => {
+      firebaseAuth.verifyIdToken.mockResolvedValue({
+        ...identity,
+        emailVerified: false,
+      });
+      const legacy = makeUser({ isVerified: false });
+      userModel.findOne
+        .mockReturnValueOnce(query(null)) // by firebaseUid
+        .mockReturnValueOnce(query(legacy)); // by email
+
+      await expect(
+        service.signInWithFirebase('id-token'),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+
+      expect(legacy.firebaseUid).toBeUndefined();
+      expect(legacy.authProvider).toBeUndefined();
+      expect(legacy.save).not.toHaveBeenCalled();
+    });
+
     it('signals ONBOARDING_REQUIRED when no account exists', async () => {
       firebaseAuth.verifyIdToken.mockResolvedValue(identity);
       userModel.findOne
