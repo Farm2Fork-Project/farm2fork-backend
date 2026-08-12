@@ -6,6 +6,7 @@ import {
   ValidationError,
 } from '@nestjs/common';
 import { SwaggerModule } from '@nestjs/swagger';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { createSwaggerDocument } from './swagger-document';
 
@@ -20,19 +21,31 @@ async function bootstrap() {
   const swaggerEnabled = configService.get<boolean>('SWAGGER_ENABLED', true);
   const swaggerPath = configService.get<string>('SWAGGER_PATH', 'api/docs');
   const nodeEnv = configService.get<string>('NODE_ENV', 'development');
-  const corsOrigin = configService.get<string>('CORS_ORIGIN', '*');
+  const corsOrigin = configService.get<string>('CORS_ORIGIN', '');
 
   // Set API prefix
   app.setGlobalPrefix(apiPrefix);
 
-  // Enable CORS
+  // Parse cookies so the Firebase web session cookie is available to guards.
+  app.use(cookieParser());
+
+  // Credentialed CORS is required for the HTTP-only web session cookie, and a
+  // wildcard origin is invalid when credentials are enabled. Fail fast on '*'.
+  const allowedOrigins = corsOrigin
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (allowedOrigins.length === 0 || allowedOrigins.includes('*')) {
+    throw new Error(
+      'CORS_ORIGIN must be an explicit comma-separated origin list (not "*") ' +
+        'because credentialed web sessions are enabled.',
+    );
+  }
   app.enableCors({
-    origin:
-      corsOrigin === '*'
-        ? true
-        : corsOrigin.split(',').map((item) => item.trim()),
+    origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Farm2Fork-CSRF'],
   });
 
   // Global validation pipe

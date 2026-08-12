@@ -4,6 +4,7 @@ import { APP_GUARD } from '@nestjs/core';
 import * as Joi from 'joi';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { CsrfGuard } from './common/guards/csrf.guard';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import {
@@ -115,6 +116,11 @@ const featureModules = [
         // Privileged-role provisioning allowlists (comma-separated emails).
         ADMIN_EMAIL_ALLOWLIST: Joi.string().optional(),
         FINANCIAL_PARTNER_EMAIL_ALLOWLIST: Joi.string().optional(),
+        // Firebase web session (HTTP-only cookie) + CSRF/origin protection.
+        WEB_APP_ORIGIN: Joi.string().optional(),
+        WEB_SESSION_TTL_SECONDS: Joi.number().integer().min(300).default(86_400),
+        WEB_SESSION_COOKIE_NAME: Joi.string().default('f2f_session'),
+        WEB_SESSION_COOKIE_SECURE: Joi.boolean().default(true),
       }),
       validationOptions: {
         allowUnknown: true,
@@ -129,8 +135,9 @@ const featureModules = [
   controllers: [AppController],
   providers: [
     AppService,
-    // Global authentication then role authorization (master context 9.3).
-    // Order matters: JWT runs first to populate request.user, then roles.
+    // Guard order matters. CSRF/origin runs first to reject unsafe browser
+    // cookie requests, then JWT authenticates (Bearer), then roles authorize.
+    { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
   ],
