@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   UnauthorizedException,
@@ -10,11 +11,16 @@ import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { Model } from 'mongoose';
 import { RedisService } from '../../infrastructure/redis/redis.service';
+import { FirebaseAuthService } from '../../infrastructure/firebase/firebase-auth.service';
+import { FirebaseIdentity } from '../../infrastructure/firebase/firebase-identity.interface';
 import { UserRole } from '../../common/enums/user-role.enum';
 import {
   AuthResultDto,
   AuthUserDto,
   ConfirmPasswordResetDto,
+  FirebaseOnboardBuyerDto,
+  FirebaseOnboardFarmerDto,
+  FirebaseOnboardTransporterDto,
   LoginDto,
   RegisterBuyerDto,
   RegisterFarmerDto,
@@ -41,6 +47,17 @@ const RESET_TOKEN_TTL_SECONDS = 60 * 60; // 1h
 const VERIFY_KEY_PREFIX = 'auth:verify:';
 const RESET_KEY_PREFIX = 'auth:pwreset:';
 
+/**
+ * Roles that may self-register (choose their own role at onboarding). admin and
+ * financial_partner are privileged and provisioned separately via an allowlist,
+ * never self-assignable through a public endpoint (master context 17.2).
+ */
+const SELF_SERVICE_ROLES: UserRole[] = [
+  UserRole.Farmer,
+  UserRole.Buyer,
+  UserRole.Transporter,
+];
+
 interface MongoDuplicateKeyError {
   code?: number;
   keyPattern?: Record<string, unknown>;
@@ -60,6 +77,7 @@ export class AuthService {
     private readonly transporterProfileModel: Model<TransporterProfileDocument>,
     private readonly jwtService: JwtService,
     private readonly redisService: RedisService,
+    private readonly firebaseAuthService: FirebaseAuthService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -149,6 +167,12 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
+    // Firebase-provisioned accounts have no local password: they must use the
+    // Firebase sign-in path, not email/password login.
+    if (!user.passwordHash) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
+
     const passwordMatches = await bcrypt.compare(
       dto.password,
       user.passwordHash,
@@ -171,6 +195,124 @@ export class AuthService {
       throw new UnauthorizedException('Account no longer exists');
     }
     return this.toAuthUser(user);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Firebase authentication (Google / email-password)
+  //
+  // Firebase authenticates; the backend authorizes. We verify the Firebase ID
+  // token, then either sign in an existing account (minting our own JWT) or,
+  // for a first-time identity, require onboarding to capture role + profile/KYC.
+  // ---------------------------------------------------------------------------
+
+  /** Sign in a returning user with a verified Firebase identity. */
+  async signInWithFirebase(idToken: string): Promise<AuthResultDto> {
+    const identity = await this.firebaseAuthService.verifyIdToken(idToken);
+    const user = await this.resolveFirebaseUser(identity);
+
+    if (!user) {
+      // Known Firebase identity, but no Farm2Fork account yet: the client must
+      // onboard (choose a role, provide profile/KYC). `code` lets clients route.
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'ONBOARDING_REQUIRED',
+        message:
+          'No Farm2Fork account is linked to this identity. Complete onboarding to choose a role.',
+      });
+    }
+
+    if (!user.isActive) {
+      throw new UnauthorizedException('Account has been deactivated');
+    }
+
+    return this.buildAuthResult(user);
+  }
+
+  async onboardFarmerWithFirebase(
+    dto: FirebaseOnboardFarmerDto,
+  ): Promise<AuthResultDto> {
+    const identity = await this.beginFirebaseOnboarding(
+      dto.idToken,
+      UserRole.Farmer,
+    );
+    if (await this.farmerProfileModel.exists({ cnic: dto.cnic })) {
+      throw new ConflictException('CNIC is already registered');
+    }
+
+    const user = await this.createFirebaseUser(
+      identity,
+      UserRole.Farmer,
+      dto.phone,
+    );
+    await this.createProfileOrRollback(user, () =>
+      this.farmerProfileModel.create({
+        userId: user._id,
+        farmName: dto.farmName,
+        cnic: dto.cnic,
+        farmLocation: dto.farmLocation,
+        cropTypes: dto.cropTypes ?? [],
+        landSizeAcres: dto.landSizeAcres,
+        bankAccountDetails: dto.bankAccountDetails,
+      }),
+    );
+    return this.buildAuthResult(user);
+  }
+
+  async onboardBuyerWithFirebase(
+    dto: FirebaseOnboardBuyerDto,
+  ): Promise<AuthResultDto> {
+    const identity = await this.beginFirebaseOnboarding(
+      dto.idToken,
+      UserRole.Buyer,
+    );
+    if (await this.buyerProfileModel.exists({ cnic: dto.cnic })) {
+      throw new ConflictException('CNIC is already registered');
+    }
+
+    const user = await this.createFirebaseUser(
+      identity,
+      UserRole.Buyer,
+      dto.phone,
+    );
+    await this.createProfileOrRollback(user, () =>
+      this.buyerProfileModel.create({
+        userId: user._id,
+        businessName: dto.businessName,
+        businessType: dto.businessType,
+        cnic: dto.cnic,
+        addresses: dto.addresses ?? [],
+      }),
+    );
+    return this.buildAuthResult(user);
+  }
+
+  async onboardTransporterWithFirebase(
+    dto: FirebaseOnboardTransporterDto,
+  ): Promise<AuthResultDto> {
+    const identity = await this.beginFirebaseOnboarding(
+      dto.idToken,
+      UserRole.Transporter,
+    );
+    if (await this.transporterProfileModel.exists({ cnic: dto.cnic })) {
+      throw new ConflictException('CNIC is already registered');
+    }
+
+    const user = await this.createFirebaseUser(
+      identity,
+      UserRole.Transporter,
+      dto.phone,
+    );
+    await this.createProfileOrRollback(user, () =>
+      this.transporterProfileModel.create({
+        userId: user._id,
+        vehicleType: dto.vehicleType,
+        vehicleNumber: dto.vehicleNumber,
+        licenseNumber: dto.licenseNumber,
+        cnic: dto.cnic,
+        serviceAreas: dto.serviceAreas ?? [],
+      }),
+    );
+    return this.buildAuthResult(user);
   }
 
   // ---------------------------------------------------------------------------
@@ -249,6 +391,83 @@ export class AuthService {
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
+
+  /**
+   * Resolve an existing account for a verified Firebase identity. Matches by
+   * firebaseUid first; otherwise links a pre-existing account with the same
+   * email (migration path for a user who previously had a local password).
+   * Returns null when no account exists yet (caller triggers onboarding).
+   */
+  private async resolveFirebaseUser(
+    identity: FirebaseIdentity,
+  ): Promise<UserDocument | null> {
+    const byUid = await this.userModel
+      .findOne({ firebaseUid: identity.uid })
+      .exec();
+    if (byUid) {
+      return byUid;
+    }
+
+    const byEmail = await this.userModel
+      .findOne({ email: identity.email.toLowerCase().trim() })
+      .exec();
+    if (byEmail) {
+      byEmail.firebaseUid = identity.uid;
+      byEmail.authProvider = identity.provider;
+      if (identity.emailVerified && !byEmail.isVerified) {
+        byEmail.isVerified = true;
+      }
+      await byEmail.save();
+      return byEmail;
+    }
+
+    return null;
+  }
+
+  /** Verify the Firebase token and guard first-time onboarding preconditions. */
+  private async beginFirebaseOnboarding(
+    idToken: string,
+    role: UserRole,
+  ): Promise<FirebaseIdentity> {
+    this.assertSelfServiceRole(role);
+    const identity = await this.firebaseAuthService.verifyIdToken(idToken);
+
+    const email = identity.email.toLowerCase().trim();
+    const [existingByUid, existingByEmail] = await Promise.all([
+      this.userModel.exists({ firebaseUid: identity.uid }),
+      this.userModel.exists({ email }),
+    ]);
+    if (existingByUid || existingByEmail) {
+      throw new ConflictException('This account is already registered');
+    }
+    return identity;
+  }
+
+  private async createFirebaseUser(
+    identity: FirebaseIdentity,
+    role: UserRole,
+    phone?: string,
+  ): Promise<UserDocument> {
+    try {
+      return await this.userModel.create({
+        email: identity.email.toLowerCase().trim(),
+        firebaseUid: identity.uid,
+        authProvider: identity.provider,
+        role,
+        phone,
+        isVerified: identity.emailVerified,
+      });
+    } catch (error) {
+      throw this.mapDuplicateKeyError(error);
+    }
+  }
+
+  private assertSelfServiceRole(role: UserRole): void {
+    if (!SELF_SERVICE_ROLES.includes(role)) {
+      // Defense in depth: admin/financial_partner are never self-onboardable.
+      throw new ForbiddenException('This role cannot self-register');
+    }
+  }
 
   private async assertEmailAvailable(email: string): Promise<void> {
     const exists = await this.userModel
@@ -348,6 +567,9 @@ export class AuthService {
       }
       if (field === 'cnic') {
         return new ConflictException('CNIC is already registered');
+      }
+      if (field === 'firebaseUid') {
+        return new ConflictException('This account is already registered');
       }
       return new ConflictException(`${field} already exists`);
     }

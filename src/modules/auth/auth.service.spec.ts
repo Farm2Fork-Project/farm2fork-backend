@@ -5,7 +5,9 @@ import { getModelToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
 import * as bcrypt from 'bcrypt';
 import { RedisService } from '../../infrastructure/redis/redis.service';
+import { FirebaseAuthService } from '../../infrastructure/firebase/firebase-auth.service';
 import { UserRole } from '../../common/enums/user-role.enum';
+import { AuthProvider } from '../../common/enums/auth-provider.enum';
 import { AuthService } from './auth.service';
 import { BusinessType } from './schemas/buyer-profile.schema';
 import { BuyerProfile } from './schemas/buyer-profile.schema';
@@ -29,6 +31,7 @@ const makeUser = (overrides: Record<string, unknown> = {}) => ({
   isVerified: false,
   isActive: true,
   passwordHash: '',
+  save: jest.fn<() => Promise<unknown>>().mockResolvedValue(undefined),
   ...overrides,
 });
 
@@ -40,6 +43,7 @@ describe('AuthService', () => {
   let transporterModel: Record<string, jest.Mock>;
   let jwt: { sign: jest.Mock };
   let redis: Record<string, jest.Mock>;
+  let firebaseAuth: { verifyIdToken: jest.Mock };
 
   beforeEach(async () => {
     userModel = {
@@ -59,6 +63,7 @@ describe('AuthService', () => {
       set: jest.fn().mockReturnValue(Promise.resolve('OK')),
       del: jest.fn().mockReturnValue(Promise.resolve(1)),
     };
+    firebaseAuth = { verifyIdToken: jest.fn() };
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
@@ -72,6 +77,7 @@ describe('AuthService', () => {
         },
         { provide: JwtService, useValue: jwt },
         { provide: RedisService, useValue: redis },
+        { provide: FirebaseAuthService, useValue: firebaseAuth },
       ],
     }).compile();
 
@@ -270,6 +276,109 @@ describe('AuthService', () => {
         bcrypt.compare('NewStrongP@ss1', update.$set.passwordHash),
       ).resolves.toBe(true);
       expect(redis.del).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('signInWithFirebase', () => {
+    const identity = {
+      uid: 'fb-uid-1',
+      email: 'farmer@example.com',
+      emailVerified: true,
+      provider: AuthProvider.Google,
+    };
+
+    it('mints a JWT for an account already linked by firebaseUid', async () => {
+      firebaseAuth.verifyIdToken.mockResolvedValue(identity);
+      userModel.findOne.mockReturnValueOnce(query(makeUser()));
+
+      const result = await service.signInWithFirebase('id-token');
+      expect(result.accessToken).toBe('signed.jwt.token');
+      expect(firebaseAuth.verifyIdToken).toHaveBeenCalledWith('id-token');
+    });
+
+    it('links a pre-existing email account on first Firebase sign-in', async () => {
+      firebaseAuth.verifyIdToken.mockResolvedValue(identity);
+      const legacy = makeUser({ isVerified: false });
+      userModel.findOne
+        .mockReturnValueOnce(query(null)) // by firebaseUid
+        .mockReturnValueOnce(query(legacy)); // by email
+
+      const result = await service.signInWithFirebase('id-token');
+      expect(legacy.firebaseUid).toBe('fb-uid-1');
+      expect(legacy.authProvider).toBe(AuthProvider.Google);
+      expect(legacy.isVerified).toBe(true);
+      expect(legacy.save).toHaveBeenCalledTimes(1);
+      expect(result.accessToken).toBe('signed.jwt.token');
+    });
+
+    it('signals ONBOARDING_REQUIRED when no account exists', async () => {
+      firebaseAuth.verifyIdToken.mockResolvedValue(identity);
+      userModel.findOne
+        .mockReturnValueOnce(query(null)) // by firebaseUid
+        .mockReturnValueOnce(query(null)); // by email
+
+      await expect(
+        service.signInWithFirebase('id-token'),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('rejects a deactivated account', async () => {
+      firebaseAuth.verifyIdToken.mockResolvedValue(identity);
+      userModel.findOne.mockReturnValueOnce(
+        query(makeUser({ isActive: false })),
+      );
+      await expect(
+        service.signInWithFirebase('id-token'),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+  });
+
+  describe('onboardFarmerWithFirebase', () => {
+    const identity = {
+      uid: 'fb-uid-2',
+      email: 'newfarmer@example.com',
+      emailVerified: true,
+      provider: AuthProvider.Google,
+    };
+    const dto = {
+      idToken: 'id-token',
+      farmName: 'Green Acres',
+      cnic: '35202-1234567-1',
+    };
+
+    it('creates a Firebase-linked user and farmer profile', async () => {
+      firebaseAuth.verifyIdToken.mockResolvedValue(identity);
+      userModel.exists.mockReturnValue(query(null));
+      farmerModel.exists.mockReturnValue(Promise.resolve(null));
+      userModel.create.mockReturnValue(
+        Promise.resolve(makeUser({ role: UserRole.Farmer })),
+      );
+      farmerModel.create.mockReturnValue(Promise.resolve({}));
+
+      const result = await service.onboardFarmerWithFirebase(dto);
+
+      const created = userModel.create.mock.calls[0][0] as {
+        email: string;
+        firebaseUid: string;
+        authProvider: AuthProvider;
+        passwordHash?: string;
+      };
+      expect(created.email).toBe('newfarmer@example.com');
+      expect(created.firebaseUid).toBe('fb-uid-2');
+      expect(created.authProvider).toBe(AuthProvider.Google);
+      expect(created.passwordHash).toBeUndefined();
+      expect(farmerModel.create).toHaveBeenCalledTimes(1);
+      expect(result.accessToken).toBe('signed.jwt.token');
+    });
+
+    it('rejects onboarding when the identity is already registered', async () => {
+      firebaseAuth.verifyIdToken.mockResolvedValue(identity);
+      userModel.exists.mockReturnValue(query({ _id: 'x' }));
+
+      await expect(
+        service.onboardFarmerWithFirebase(dto),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(userModel.create).not.toHaveBeenCalled();
     });
   });
 

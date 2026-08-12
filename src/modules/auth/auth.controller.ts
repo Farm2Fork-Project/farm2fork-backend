@@ -21,6 +21,10 @@ import {
   AuthResultDto,
   AuthUserDto,
   ConfirmPasswordResetDto,
+  FirebaseAuthDto,
+  FirebaseOnboardBuyerDto,
+  FirebaseOnboardFarmerDto,
+  FirebaseOnboardTransporterDto,
   LoginDto,
   RegisterBuyerDto,
   RegisterFarmerDto,
@@ -131,6 +135,59 @@ export class AuthController {
     @Body() dto: ConfirmPasswordResetDto,
   ): Promise<{ message: string }> {
     return this.authService.confirmPasswordReset(dto);
+  }
+
+  @Public()
+  @Post('firebase')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Sign in with a Firebase ID token (Google or email/password)',
+    description:
+      'Verifies the Firebase ID token and returns a Farm2Fork JWT. Returns 409 (code ONBOARDING_REQUIRED) when the identity has no account yet.',
+  })
+  @ApiResponse({ status: 200, type: AuthResultDto })
+  @ApiErrorResponses(400, 401, 409)
+  signInWithFirebase(@Body() dto: FirebaseAuthDto): Promise<AuthResultDto> {
+    return this.authService.signInWithFirebase(dto.idToken);
+  }
+
+  @Public()
+  @Post('firebase/onboard/farmer')
+  @ApiOperation({
+    summary: 'Onboard a farmer for a verified Firebase identity (US-01)',
+  })
+  @ApiResponse({ status: 201, type: AuthResultDto })
+  @ApiErrorResponses(400, 401, 409)
+  onboardFarmerWithFirebase(
+    @Body() dto: FirebaseOnboardFarmerDto,
+  ): Promise<AuthResultDto> {
+    return this.authService.onboardFarmerWithFirebase(dto);
+  }
+
+  @Public()
+  @Post('firebase/onboard/buyer')
+  @ApiOperation({
+    summary: 'Onboard a buyer for a verified Firebase identity (US-01)',
+  })
+  @ApiResponse({ status: 201, type: AuthResultDto })
+  @ApiErrorResponses(400, 401, 409)
+  onboardBuyerWithFirebase(
+    @Body() dto: FirebaseOnboardBuyerDto,
+  ): Promise<AuthResultDto> {
+    return this.authService.onboardBuyerWithFirebase(dto);
+  }
+
+  @Public()
+  @Post('firebase/onboard/transporter')
+  @ApiOperation({
+    summary: 'Onboard a transporter for a verified Firebase identity (US-01)',
+  })
+  @ApiResponse({ status: 201, type: AuthResultDto })
+  @ApiErrorResponses(400, 401, 409)
+  onboardTransporterWithFirebase(
+    @Body() dto: FirebaseOnboardTransporterDto,
+  ): Promise<AuthResultDto> {
+    return this.authService.onboardTransporterWithFirebase(dto);
   }
 
   @Get('me')
