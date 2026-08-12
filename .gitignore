@@ -19,6 +19,11 @@ lerna-debug.log*
 .env.test
 .env.production
 
+# Firebase Admin service-account keys - SECRET, never commit
+*firebase-adminsdk*.json
+*service-account*.json
+serviceAccount*.json
+
 # temp directory
 .temp
 .tmp

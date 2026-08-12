@@ -12,7 +12,7 @@ import {
   swaggerConfig,
   validationConfig,
 } from './config';
-import { DatabaseModule, RedisModule } from './infrastructure';
+import { DatabaseModule, FirebaseModule, RedisModule } from './infrastructure';
 import { AdminModule } from './modules/admin/admin.module';
 import { AiModule } from './modules/ai/ai.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -105,6 +105,16 @@ const featureModules = [
         ),
         SWAGGER_ENABLED: Joi.boolean().default(true),
         SWAGGER_PATH: Joi.string().default('api/docs'),
+        // Firebase Auth (Google / email-password). The service-account key is a
+        // SECRET and must live OUTSIDE the repo (see .env.example).
+        FIREBASE_AUTH_ENABLED: Joi.boolean().default(false),
+        FIREBASE_PROJECT_ID: Joi.string().optional(),
+        FIREBASE_SERVICE_ACCOUNT_JSON: Joi.string().optional(),
+        FIREBASE_SERVICE_ACCOUNT_PATH: Joi.string().optional(),
+        GOOGLE_APPLICATION_CREDENTIALS: Joi.string().optional(),
+        // Privileged-role provisioning allowlists (comma-separated emails).
+        ADMIN_EMAIL_ALLOWLIST: Joi.string().optional(),
+        FINANCIAL_PARTNER_EMAIL_ALLOWLIST: Joi.string().optional(),
       }),
       validationOptions: {
         allowUnknown: true,
@@ -113,7 +123,7 @@ const featureModules = [
       load: [appConfig, blockchainConfig, swaggerConfig, validationConfig],
     }),
     ...(shouldLoadInfrastructure
-      ? [DatabaseModule, RedisModule, ...featureModules]
+      ? [DatabaseModule, RedisModule, FirebaseModule, ...featureModules]
       : []),
   ],
   controllers: [AppController],
