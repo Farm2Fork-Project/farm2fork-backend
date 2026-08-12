@@ -408,6 +408,12 @@ export class AuthService {
       return byUid;
     }
 
+    if (!identity.emailVerified) {
+      throw new UnauthorizedException(
+        'Firebase email must be verified before linking an existing account',
+      );
+    }
+
     const byEmail = await this.userModel
       .findOne({ email: identity.email.toLowerCase().trim() })
       .exec();
