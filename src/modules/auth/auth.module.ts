@@ -7,6 +7,7 @@ import { PassportModule } from '@nestjs/passport';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { FirebaseSessionAuthGuard } from '../../common/guards/firebase-session-auth.guard';
 import {
   BuyerProfile,
   BuyerProfileSchema,
@@ -51,7 +52,7 @@ import { User, UserSchema } from './schemas/user.schema';
     ]),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
-  exports: [AuthService, MongooseModule],
+  providers: [AuthService, JwtStrategy, FirebaseSessionAuthGuard],
+  exports: [AuthService, FirebaseSessionAuthGuard, MongooseModule],
 })
 export class AuthModule {}

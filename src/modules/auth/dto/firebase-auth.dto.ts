@@ -14,6 +14,7 @@ import {
 import { IsValidPhoneNumber } from '../../../common/validators/phone.validator';
 import { BusinessType } from '../schemas/buyer-profile.schema';
 import { VehicleType } from '../schemas/transporter-profile.schema';
+import { InstitutionType } from '../schemas/financial-partner-profile.schema';
 import {
   BankAccountDetailsDto,
   BuyerAddressDto,
@@ -132,4 +133,42 @@ export class FirebaseOnboardTransporterDto extends FirebaseOnboardDto {
   @IsArray()
   @IsString({ each: true })
   serviceAreas?: string[];
+}
+
+/** POST /auth/firebase/onboard/financial-partner (allowlisted identities only). */
+export class FirebaseOnboardFinancialPartnerDto extends FirebaseOnboardDto {
+  @ApiProperty({ example: 'Farm2Fork Microfinance' })
+  @IsString()
+  @IsNotEmpty()
+  institutionName!: string;
+
+  @ApiProperty({ enum: InstitutionType, example: InstitutionType.Microfinance })
+  @IsEnum(InstitutionType)
+  institutionType!: InstitutionType;
+
+  @ApiProperty({ example: 'LIC-12345' })
+  @IsString()
+  @IsNotEmpty()
+  licenseNumber!: string;
+
+  @ApiProperty({ example: '35202-1234567-1', description: 'Pakistani CNIC' })
+  @Matches(CNIC_REGEX, { message: 'cnic must be a valid Pakistani CNIC' })
+  cnic!: string;
+
+  @ApiPropertyOptional({ example: 'Regional lending manager' })
+  @IsOptional()
+  @IsString()
+  designation?: string;
+
+  @ApiPropertyOptional({ example: 500000 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  approvalLimit?: number;
+
+  @ApiPropertyOptional({ type: [String], example: ['Lahore', 'Faisalabad'] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  serviceRegions?: string[];
 }

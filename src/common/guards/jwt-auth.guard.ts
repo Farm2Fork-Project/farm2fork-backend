@@ -2,6 +2,7 @@ import { ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { FirebaseSessionAuthGuard } from './firebase-session-auth.guard';
 
 /**
  * Global authentication guard. Validates the JWT Bearer token via the 'jwt'
@@ -9,7 +10,10 @@ import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
  */
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
-  constructor(private readonly reflector: Reflector) {
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly firebaseSessionAuthGuard: FirebaseSessionAuthGuard,
+  ) {
     super();
   }
 
@@ -23,6 +27,13 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       return true;
     }
 
-    return super.canActivate(context);
+    const request = context.switchToHttp().getRequest<{
+      headers?: Record<string, string | undefined>;
+      cookies?: Record<string, string | undefined>;
+    }>();
+    if (request.headers?.authorization?.startsWith('Bearer ')) {
+      return super.canActivate(context);
+    }
+    return this.firebaseSessionAuthGuard.canActivate(context);
   }
 }
