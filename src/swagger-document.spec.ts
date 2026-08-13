@@ -68,14 +68,6 @@ describe('createSwaggerDocument', () => {
     ).not.toHaveProperty('gatewayRef');
 
     expectPublic(document, '/api/health', 'get', '200');
-    expectPublic(document, '/api/auth/register/farmer', 'post', '201');
-    expectPublic(document, '/api/auth/register/buyer', 'post', '201');
-    expectPublic(document, '/api/auth/register/transporter', 'post', '201');
-    expectPublic(document, '/api/auth/login', 'post', '200');
-    expectPublic(document, '/api/auth/verify-email', 'post', '200');
-    expectPublic(document, '/api/auth/resend-verification', 'post', '200');
-    expectPublic(document, '/api/auth/password-reset/request', 'post', '200');
-    expectPublic(document, '/api/auth/password-reset/confirm', 'post', '200');
     expectPublic(document, '/api/auth/firebase', 'post', '200');
     expectPublic(document, '/api/auth/firebase/onboard/farmer', 'post', '201');
     expectPublic(document, '/api/auth/firebase/onboard/buyer', 'post', '201');
@@ -102,6 +94,14 @@ describe('createSwaggerDocument', () => {
       '201',
     );
     expectPublic(document, '/api/auth/web/logout', 'post', '200');
+    expect(document.paths['/api/auth/register/farmer']).toBeUndefined();
+    expect(document.paths['/api/auth/register/buyer']).toBeUndefined();
+    expect(document.paths['/api/auth/register/transporter']).toBeUndefined();
+    expect(document.paths['/api/auth/login']).toBeUndefined();
+    expect(document.paths['/api/auth/verify-email']).toBeUndefined();
+    expect(document.paths['/api/auth/resend-verification']).toBeUndefined();
+    expect(document.paths['/api/auth/password-reset/request']).toBeUndefined();
+    expect(document.paths['/api/auth/password-reset/confirm']).toBeUndefined();
     expectPublicError(
       document,
       '/api/payments/webhook/{gateway}',
