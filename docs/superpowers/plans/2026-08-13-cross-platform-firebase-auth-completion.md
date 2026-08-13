@@ -25,11 +25,11 @@
 
 **Produces:** Stable error codes for all clients: `EMAIL_VERIFICATION_REQUIRED`, `ONBOARDING_REQUIRED`, and `PRIVILEGED_ONBOARDING_REQUIRED`.
 
-- [ ] **Step 1: Add focused failing error-code tests**
-- [ ] **Step 2: Verify the tests fail only if a code is absent or incorrect**
-- [ ] **Step 3: Make the smallest backend correction, if required**
-- [ ] **Step 4: Run focused backend tests and build**
-- [ ] **Step 5: Commit any backend correction separately**
+- [x] **Step 1: Add focused failing error-code tests**
+- [x] **Step 2: Verify the tests fail only if a code is absent or incorrect**
+- [x] **Step 3: Make the smallest backend correction, if required**
+- [x] **Step 4: Run focused backend tests and build**
+- [x] **Step 5: Commit any backend correction separately**
 
 ### Task 2: Complete the web Firebase lifecycle
 
@@ -41,12 +41,12 @@
 
 **Produces:** Email/password sign-up sends verification; unverified sign-in enters verify/resend/refresh; verified new email and Google identities select a self-service role then submit the existing KYC form; verified existing identities establish a cookie session. Google provider sign-in is available on every public role login surface.
 
-- [ ] **Step 1: Add failing repository tests for Google exchange and verification-required errors**
-- [ ] **Step 2: Add failing UI tests for the verify and Google entry points**
-- [ ] **Step 3: Implement the repository lifecycle and shared error decoding**
-- [ ] **Step 4: Wire the buyer, farmer, and transporter screens to it**
-- [ ] **Step 5: Run web tests and production build**
-- [ ] **Step 6: Commit the web lifecycle change**
+- [x] **Step 1: Add failing repository tests for Google exchange and verification-required errors**
+- [x] **Step 2: Add failing UI tests for the verify and Google entry points**
+- [x] **Step 3: Implement the repository lifecycle and shared error decoding**
+- [x] **Step 4: Wire the buyer, farmer, and transporter screens to it**
+- [x] **Step 5: Run web tests and production build**
+- [x] **Step 6: Commit the web lifecycle change**
 
 ### Task 3: Complete the mobile Firebase lifecycle
 
@@ -58,12 +58,12 @@
 
 **Produces:** Email/password registration sends verification and pauses before onboarding; email sign-in handles unverified status; verification resend plus refresh force a new Firebase ID token; Google identity onboarding uses the existing role/KYC screens; password reset is Firebase-only.
 
-- [ ] **Step 1: Add failing gateway/repository/controller tests for verification lifecycle**
-- [ ] **Step 2: Implement Firebase verification, token refresh, and password-reset gateway APIs**
-- [ ] **Step 3: Decode the backend verification error without treating all 409s alike**
-- [ ] **Step 4: Add verify/resend/refresh/reset mobile UI state**
-- [ ] **Step 5: Run Flutter formatting, analysis, and auth tests**
-- [ ] **Step 6: Commit the mobile lifecycle change**
+- [x] **Step 1: Add failing gateway/repository/controller tests for verification lifecycle**
+- [x] **Step 2: Implement Firebase verification, token refresh, and password-reset gateway APIs**
+- [x] **Step 3: Decode the backend verification error without treating all 409s alike**
+- [x] **Step 4: Add verify/resend/refresh/reset mobile UI state**
+- [x] **Step 5: Run Flutter formatting, analysis, and auth tests**
+- [x] **Step 6: Commit the mobile lifecycle change**
 
 ### Task 4: Verify the shared runtime contract
 
@@ -75,8 +75,8 @@
 
 - [ ] **Step 1: Verify backend and web Docker configuration share the exact allowed origin and Firebase project**
 - [ ] **Step 2: Execute non-destructive authenticated smoke requests when Firebase credentials and the backend runtime are available**
-- [ ] **Step 3: Record executed checks, blocked external checks, and required manual device/browser checks**
-- [ ] **Step 4: Commit the verification record**
+- [x] **Step 3: Record executed checks, blocked external checks, and required manual device/browser checks**
+- [x] **Step 4: Commit the verification record**
 
 ## Plan Self-Review
 
