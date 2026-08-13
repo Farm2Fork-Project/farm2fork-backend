@@ -23,19 +23,11 @@ import { AuthService } from './auth.service';
 import {
   AuthResultDto,
   AuthUserDto,
-  ConfirmPasswordResetDto,
   FirebaseAuthDto,
   FirebaseOnboardBuyerDto,
   FirebaseOnboardFarmerDto,
   FirebaseOnboardFinancialPartnerDto,
   FirebaseOnboardTransporterDto,
-  LoginDto,
-  RegisterBuyerDto,
-  RegisterFarmerDto,
-  RegisterTransporterDto,
-  RequestPasswordResetDto,
-  ResendVerificationDto,
-  VerifyEmailDto,
 } from './dto';
 
 @ApiTags('Auth')
@@ -45,104 +37,6 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly configService: ConfigService,
   ) {}
-
-  @Public()
-  @Post('register/farmer')
-  @ApiOperation({ summary: 'Register a new farmer account (US-01)' })
-  @ApiResponse({ status: 201, type: AuthResultDto })
-  @ApiErrorResponses(400, 409)
-  registerFarmer(@Body() dto: RegisterFarmerDto): Promise<AuthResultDto> {
-    return this.authService.registerFarmer(dto);
-  }
-
-  @Public()
-  @Post('register/buyer')
-  @ApiOperation({ summary: 'Register a new buyer account (US-01)' })
-  @ApiResponse({ status: 201, type: AuthResultDto })
-  @ApiErrorResponses(400, 409)
-  registerBuyer(@Body() dto: RegisterBuyerDto): Promise<AuthResultDto> {
-    return this.authService.registerBuyer(dto);
-  }
-
-  @Public()
-  @Post('register/transporter')
-  @ApiOperation({ summary: 'Register a new transporter account (US-01)' })
-  @ApiResponse({ status: 201, type: AuthResultDto })
-  @ApiErrorResponses(400, 409)
-  registerTransporter(
-    @Body() dto: RegisterTransporterDto,
-  ): Promise<AuthResultDto> {
-    return this.authService.registerTransporter(dto);
-  }
-
-  @Public()
-  @Post('login')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Log in with email and password (US-02)' })
-  @ApiResponse({ status: 200, type: AuthResultDto })
-  @ApiErrorResponses(400, 401)
-  login(@Body() dto: LoginDto): Promise<AuthResultDto> {
-    return this.authService.login(dto);
-  }
-
-  @Public()
-  @Post('verify-email')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Verify email with a token' })
-  @ApiResponse({ status: 200, schema: { example: { verified: true } } })
-  @ApiErrorResponses(400, 401)
-  verifyEmail(@Body() dto: VerifyEmailDto): Promise<{ verified: boolean }> {
-    return this.authService.verifyEmail(dto.token);
-  }
-
-  @Public()
-  @Post('resend-verification')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Resend the email verification token' })
-  @ApiResponse({
-    status: 200,
-    schema: {
-      example: { message: 'Verification email sent if the account exists' },
-    },
-  })
-  @ApiErrorResponses(400)
-  resendVerification(
-    @Body() dto: ResendVerificationDto,
-  ): Promise<{ message: string }> {
-    return this.authService.resendVerification(dto.email);
-  }
-
-  @Public()
-  @Post('password-reset/request')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Request a password reset token (US-03)' })
-  @ApiResponse({
-    status: 200,
-    schema: {
-      example: { message: 'Password reset email sent if the account exists' },
-    },
-  })
-  @ApiErrorResponses(400)
-  requestPasswordReset(
-    @Body() dto: RequestPasswordResetDto,
-  ): Promise<{ message: string }> {
-    return this.authService.requestPasswordReset(dto.email);
-  }
-
-  @Public()
-  @Post('password-reset/confirm')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Reset password using a reset token (US-03)' })
-  @ApiResponse({
-    status: 200,
-    schema: { example: { message: 'Password reset complete' } },
-  })
-  @ApiErrorResponses(400, 401)
-  confirmPasswordReset(
-    @Body() dto: ConfirmPasswordResetDto,
-  ): Promise<{ message: string }> {
-    return this.authService.confirmPasswordReset(dto);
-  }
 
   @Public()
   @Post('firebase')

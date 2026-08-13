@@ -51,6 +51,7 @@
 ## Task 1: Backend Firebase session and request-security foundation
 
 **Files:**
+
 - Create: `src/common/guards/firebase-session-auth.guard.ts`
 - Create: `src/common/guards/firebase-session-auth.guard.spec.ts`
 - Create: `src/common/guards/csrf.guard.ts`
@@ -65,29 +66,51 @@
 
 **Produces:** `FirebaseAuthService.createSessionCookie(idToken, expiresInMs)`, `FirebaseAuthService.verifySessionCookie(cookie)`, cookie-authenticated `RequestUser`, and a global CSRF guard that permits mobile Bearer requests but rejects unsafe browser-cookie requests without an exact origin and `X-Farm2Fork-CSRF: 1`.
 
-- [ ] **Step 1: Write failing backend guard/service tests**
+- [x] **Step 1: Write failing backend guard/service tests**
 
 ```ts
 it('resolves an active user from a verified Firebase session cookie', async () => {
-  firebaseAuth.verifySessionCookie.mockResolvedValue({ uid: 'firebase-1', email: 'buyer@example.com', emailVerified: true, provider: AuthProvider.Password });
-  userModel.findOne.mockReturnValue(query({ _id: 'buyer-1', role: UserRole.Buyer, email: 'buyer@example.com', isActive: true }));
+  firebaseAuth.verifySessionCookie.mockResolvedValue({
+    uid: 'firebase-1',
+    email: 'buyer@example.com',
+    emailVerified: true,
+    provider: AuthProvider.Password,
+  });
+  userModel.findOne.mockReturnValue(
+    query({
+      _id: 'buyer-1',
+      role: UserRole.Buyer,
+      email: 'buyer@example.com',
+      isActive: true,
+    }),
+  );
 
-  await expect(guard.canActivate(contextWithCookie('f2f_session', 'cookie'))).resolves.toBe(true);
-  expect(request.user).toEqual({ id: 'buyer-1', role: UserRole.Buyer, email: 'buyer@example.com' });
+  await expect(
+    guard.canActivate(contextWithCookie('f2f_session', 'cookie')),
+  ).resolves.toBe(true);
+  expect(request.user).toEqual({
+    id: 'buyer-1',
+    role: UserRole.Buyer,
+    email: 'buyer@example.com',
+  });
 });
 
 it('rejects an unsafe cookie request without the CSRF header and web origin', () => {
-  expect(() => guard.canActivate(contextFor({ method: 'POST', cookies: { f2f_session: 'x' } }))).toThrow(ForbiddenException);
+  expect(() =>
+    guard.canActivate(
+      contextFor({ method: 'POST', cookies: { f2f_session: 'x' } }),
+    ),
+  ).toThrow(ForbiddenException);
 });
 ```
 
-- [ ] **Step 2: Run the new tests and verify they fail because the guards/session methods do not exist**
+- [x] **Step 2: Run the new tests and verify they fail because the guards/session methods do not exist**
 
 Run: `CI=true pnpm test -- firebase-session-auth.guard.spec.ts csrf.guard.spec.ts`
 
 Expected: failing compilation/import assertions for the new guards and session-cookie methods.
 
-- [ ] **Step 3: Implement the minimal session and request-security foundation**
+- [x] **Step 3: Implement the minimal session and request-security foundation**
 
 ```ts
 // firebase-auth.service.ts
@@ -112,13 +135,13 @@ if (UNSAFE_METHODS.has(request.method) && (request.headers.origin || request.coo
 
 Use `cookie-parser` and its types as direct dependencies. Add `WEB_APP_ORIGIN`, `WEB_SESSION_TTL_SECONDS`, and cookie-name/security configuration with secure production defaults. `main.ts` must reject `CORS_ORIGIN='*'` when web credentials are enabled and configure `credentials: true` with only explicit origins.
 
-- [ ] **Step 4: Run focused tests and type checks**
+- [x] **Step 4: Run focused tests and type checks**
 
 Run: `CI=true pnpm test -- firebase-session-auth.guard.spec.ts csrf.guard.spec.ts && pnpm run build`
 
 Expected: all new tests pass and Nest compiles.
 
-- [ ] **Step 5: Commit the security foundation**
+- [x] **Step 5: Commit the security foundation**
 
 ```bash
 git add package.json pnpm-lock.yaml docker-compose.yml .env.example src/common/guards src/infrastructure/firebase src/app.module.ts src/main.ts
@@ -128,6 +151,7 @@ git commit -m "feat(auth): add Firebase web session security"
 ## Task 2: Backend identity rules and web/mobile session contracts
 
 **Files:**
+
 - Create: `src/modules/auth/dto/web-session.dto.ts`
 - Modify: `src/modules/auth/auth.service.ts`
 - Modify: `src/modules/auth/auth.controller.ts`
@@ -141,31 +165,42 @@ git commit -m "feat(auth): add Firebase web session security"
 
 **Produces:** verified-only mobile Firebase responses; `/auth/web/session`, `/auth/web/onboard/*`, and `/auth/web/logout`; sanitized web responses without an access token; exact `EMAIL_VERIFICATION_REQUIRED`, `ONBOARDING_REQUIRED`, and `PRIVILEGED_ONBOARDING_REQUIRED` errors.
 
-- [ ] **Step 1: Write failing auth-service and Swagger tests**
+- [x] **Step 1: Write failing auth-service and Swagger tests**
 
 ```ts
 it('does not create an onboarding record for an unverified Firebase email', async () => {
-  firebaseAuth.verifyIdToken.mockResolvedValue({ ...identity, emailVerified: false });
-  await expect(service.onboardBuyerWithFirebase(dto)).rejects.toMatchObject({ response: { code: 'EMAIL_VERIFICATION_REQUIRED' } });
+  firebaseAuth.verifyIdToken.mockResolvedValue({
+    ...identity,
+    emailVerified: false,
+  });
+  await expect(service.onboardBuyerWithFirebase(dto)).rejects.toMatchObject({
+    response: { code: 'EMAIL_VERIFICATION_REQUIRED' },
+  });
   expect(userModel.create).not.toHaveBeenCalled();
 });
 
 it('provisions only an allowlisted admin on first verified sign-in', async () => {
-  firebaseAuth.verifyIdToken.mockResolvedValue({ ...identity, email: 'admin@example.com', emailVerified: true });
-  await expect(service.signInWithFirebase('id-token')).resolves.toMatchObject({ user: { role: UserRole.Admin } });
+  firebaseAuth.verifyIdToken.mockResolvedValue({
+    ...identity,
+    email: 'admin@example.com',
+    emailVerified: true,
+  });
+  await expect(service.signInWithFirebase('id-token')).resolves.toMatchObject({
+    user: { role: UserRole.Admin },
+  });
 });
 
 expectPublic(document, '/api/auth/web/session', 'post', '200');
 expectPublic(document, '/api/auth/register/buyer', 'post', undefined);
 ```
 
-- [ ] **Step 2: Run tests and verify the current implementation permits the unverified path and exposes legacy routes**
+- [x] **Step 2: Run tests and verify the current implementation permits the unverified path and exposes legacy routes**
 
 Run: `CI=true pnpm test -- modules/auth/auth.service.spec.ts swagger-document.spec.ts`
 
 Expected: the unverified onboarding and absent-route assertions fail.
 
-- [ ] **Step 3: Implement contract and role rules**
+- [x] **Step 3: Implement contract and role rules**
 
 ```ts
 private assertVerifiedIdentity(identity: FirebaseIdentity): void {
@@ -183,13 +218,13 @@ async createWebSession(idToken: string): Promise<AuthUserDto> {
 
 Add controller response-cookie handling with `@Res({ passthrough: true })`; return only `AuthUserDto` on web routes. Route financial onboarding only after allowlist-derived role selection. Admin is auto-created only after verified token plus allowlist. Apply the verified assertion before existing-user resolution and before every onboarding method. Preserve mobile JWT output only on mobile Firebase routes.
 
-- [ ] **Step 4: Run backend behavior, Swagger, and build checks**
+- [x] **Step 4: Run backend behavior, Swagger, and build checks**
 
 Run: `CI=true pnpm test -- modules/auth/auth.service.spec.ts swagger-document.spec.ts && pnpm run build`
 
 Expected: verified/allowlist/session tests pass, Swagger includes web routes and omits retired routes, and the build passes.
 
-- [ ] **Step 5: Commit backend session contracts**
+- [x] **Step 5: Commit backend session contracts**
 
 ```bash
 git add src/modules/auth src/swagger-document.spec.ts
@@ -199,6 +234,7 @@ git commit -m "feat(auth): enforce Firebase identity sessions"
 ## Task 3: Retire backend local-password identity paths
 
 **Files:**
+
 - Delete: `src/modules/auth/dto/login.dto.ts`
 - Delete: `src/modules/auth/dto/password-reset.dto.ts`
 - Delete: `src/modules/auth/dto/verify-email.dto.ts`
@@ -214,12 +250,17 @@ git commit -m "feat(auth): enforce Firebase identity sessions"
 
 **Produces:** no local password hash, bcrypt, Redis verification/reset logic, DTO, Swagger route, or callable legacy endpoint.
 
-- [ ] **Step 1: Write failing absence and migration-link tests**
+- [x] **Step 1: Write failing absence and migration-link tests**
 
 ```ts
 it('links a verified Firebase identity to an existing local record without reading passwordHash', async () => {
-  firebaseAuth.verifyIdToken.mockResolvedValue({ ...identity, emailVerified: true });
-  userModel.findOne.mockReturnValueOnce(query(null)).mockReturnValueOnce(query(legacyUser));
+  firebaseAuth.verifyIdToken.mockResolvedValue({
+    ...identity,
+    emailVerified: true,
+  });
+  userModel.findOne
+    .mockReturnValueOnce(query(null))
+    .mockReturnValueOnce(query(legacyUser));
   await service.signInWithFirebase('id-token');
   expect(legacyUser.firebaseUid).toBe(identity.uid);
 });
@@ -228,13 +269,13 @@ expect(document.paths['/api/auth/login']).toBeUndefined();
 expect(document.paths['/api/auth/password-reset/request']).toBeUndefined();
 ```
 
-- [ ] **Step 2: Run tests and verify legacy implementation is still present**
+- [x] **Step 2: Run tests and verify legacy implementation is still present**
 
 Run: `CI=true pnpm test -- modules/auth/auth.service.spec.ts swagger-document.spec.ts`
 
 Expected: endpoint-absence assertions fail before removal.
 
-- [ ] **Step 3: Remove legacy code and dependencies**
+- [x] **Step 3: Remove legacy code and dependencies**
 
 ```ts
 // user.schema.ts: delete passwordHash and all passwordHash JSON transform references.
@@ -244,13 +285,13 @@ Expected: endpoint-absence assertions fail before removal.
 
 Remove `bcrypt` and `@types/bcrypt` with `pnpm remove bcrypt @types/bcrypt`, then retain Redis only for its remaining application modules.
 
-- [ ] **Step 4: Run full backend verification**
+- [x] **Step 4: Run full backend verification**
 
 Run: `CI=true pnpm run build && pnpm test`
 
 Expected: Nest build succeeds and all backend suites pass with no references to retired endpoints.
 
-- [ ] **Step 5: Commit legacy retirement**
+- [x] **Step 5: Commit legacy retirement**
 
 ```bash
 git add package.json pnpm-lock.yaml src
@@ -260,6 +301,7 @@ git commit -m "refactor(auth): retire local credential endpoints"
 ## Task 4: Web Firebase client and cookie-backed repositories
 
 **Files:**
+
 - Create: `lib/firebase/client.ts`
 - Create: `lib/firebase/client.test.ts`
 - Create: `lib/auth/firebase-web-auth-repository.ts`
@@ -279,15 +321,27 @@ git commit -m "refactor(auth): retire local credential endpoints"
 
 ```ts
 test('ApiClient includes credentials and the CSRF header without an Authorization header', async () => {
-  await new ApiClient({ baseUrl: 'http://localhost:3000/api', fetchFn }).request('/auth/me', { method: 'POST' });
-  expect(fetchFn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ credentials: 'include' }));
+  await new ApiClient({
+    baseUrl: 'http://localhost:3000/api',
+    fetchFn,
+  }).request('/auth/me', { method: 'POST' });
+  expect(fetchFn).toHaveBeenCalledWith(
+    expect.any(String),
+    expect.objectContaining({ credentials: 'include' }),
+  );
   expect(headers.get('Authorization')).toBeNull();
   expect(headers.get('X-Farm2Fork-CSRF')).toBe('1');
 });
 
 test('web session exchange signs Firebase out after the backend sets the cookie', async () => {
-  await repository.signInWithEmail({ email: 'buyer@example.com', password: 'Password1!' });
-  expect(api.request).toHaveBeenCalledWith('/auth/web/session', expect.anything());
+  await repository.signInWithEmail({
+    email: 'buyer@example.com',
+    password: 'Password1!',
+  });
+  expect(api.request).toHaveBeenCalledWith(
+    '/auth/web/session',
+    expect.anything(),
+  );
   expect(firebase.signOut).toHaveBeenCalledOnce();
 });
 ```
@@ -304,7 +358,10 @@ Expected: failures because the Firebase repository does not exist and the curren
 await setPersistence(auth, inMemoryPersistence);
 const credential = await signInWithEmailAndPassword(auth, email, password);
 const idToken = await credential.user.getIdToken(true);
-const user = await api.request<ApiAuthUser>('/auth/web/session', { method: 'POST', body: { idToken } });
+const user = await api.request<ApiAuthUser>('/auth/web/session', {
+  method: 'POST',
+  body: { idToken },
+});
 await signOut(auth);
 return { user };
 ```
@@ -327,6 +384,7 @@ git commit -m "feat(auth): add Firebase web sessions"
 ## Task 5: Web role UI migration and privileged access gates
 
 **Files:**
+
 - Modify: `app/page.tsx`
 - Modify: `app/farmer/page.tsx`
 - Modify: `app/transporter/page.tsx`
@@ -349,7 +407,10 @@ git commit -m "feat(auth): add Firebase web sessions"
 
 ```tsx
 test('verification-required signup does not navigate to a buyer dashboard', async () => {
-  repository.signUpWithEmail.mockResolvedValue({ kind: 'verification_required', email: 'buyer@example.com' });
+  repository.signUpWithEmail.mockResolvedValue({
+    kind: 'verification_required',
+    email: 'buyer@example.com',
+  });
   render(<HomeContent repository={repository} />);
   await user.click(screen.getByRole('button', { name: /sign up/i }));
   expect(screen.getByText(/verify your email/i)).toBeInTheDocument();
@@ -359,7 +420,9 @@ test('verification-required signup does not navigate to a buyer dashboard', asyn
 test('admin layout rejects a cookie-authenticated non-admin user', async () => {
   api.me.mockResolvedValue({ role: 'buyer' });
   render(<AdminLayout />);
-  await waitFor(() => expect(router.replace).toHaveBeenCalledWith('/admin/login'));
+  await waitFor(() =>
+    expect(router.replace).toHaveBeenCalledWith('/admin/login'),
+  );
 });
 ```
 
@@ -373,10 +436,15 @@ Expected: tests fail before shared Firebase outcomes and server role checks repl
 
 ```tsx
 const outcome = await auth.signUpWithEmail({ email, password });
-if (outcome.kind === 'verification_required') setVerificationEmail(outcome.email);
+if (outcome.kind === 'verification_required')
+  setVerificationEmail(outcome.email);
 
 const user = await auth.refreshVerifiedIdentity();
-if (user.role !== expectedRole) throw new ApiError(403, `This account cannot access the ${expectedRole} application.`);
+if (user.role !== expectedRole)
+  throw new ApiError(
+    403,
+    `This account cannot access the ${expectedRole} application.`,
+  );
 ```
 
 On verification success, render the existing role-specific profile form and call only `/auth/web/onboard/...`. Use Firebase `sendPasswordResetEmail` for forgot-password. Admin login calls the same session exchange and only navigates after `/auth/me` reports `admin`. Financial login handles server-returned privileged onboarding with a role fixed by the backend.
@@ -397,6 +465,7 @@ git commit -m "feat(auth): connect web Firebase onboarding"
 ## Task 6: Mobile Firebase verification, reset, and outcome consistency
 
 **Files:**
+
 - Modify: `lib/features/auth/data/services/firebase_auth_gateway.dart`
 - Modify: `lib/features/auth/data/services/auth_api_service.dart`
 - Modify: `lib/features/auth/data/repositories/auth_repository.dart`
@@ -468,6 +537,7 @@ git commit -m "feat(auth): verify Firebase mobile identities"
 ## Task 7: Integrated runtime configuration and cross-platform contract verification
 
 **Files:**
+
 - Modify: backend `.env.example`, `docker-compose.yml`, `docs/superpowers/specs/2026-08-12-firebase-session-auth-cutover-design.md`
 - Modify: web `.env.example`, `Dockerfile`, `docker-compose.yml`
 - Modify: mobile setup documentation if generated Firebase action-code/authorized-domain settings need recording
@@ -489,7 +559,10 @@ it('sets a HttpOnly session cookie for the web endpoint and accepts it on /auth/
     .send({ idToken: 'firebase-token' });
 
   expect(login.headers['set-cookie'][0]).toContain('HttpOnly');
-  await request(app.getHttpServer()).get('/api/auth/me').set('Cookie', login.headers['set-cookie']).expect(200);
+  await request(app.getHttpServer())
+    .get('/api/auth/me')
+    .set('Cookie', login.headers['set-cookie'])
+    .expect(200);
 });
 ```
 

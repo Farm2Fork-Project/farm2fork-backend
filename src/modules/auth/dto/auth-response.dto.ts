@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { UserRole } from '../../../common/enums/user-role.enum';
 
-/** Public-safe view of a user - never includes passwordHash or fcmToken. */
+/** Public-safe view of a user - never includes FCM token data. */
 export class AuthUserDto {
   @ApiProperty()
   id!: string;

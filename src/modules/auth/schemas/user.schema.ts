@@ -14,15 +14,14 @@ export type UserDocument = HydratedDocument<User>;
 /**
  * users (Collection 5.1) - root entity. All profiles reference this.
  *
- * Sensitive fields (master context 6.6): passwordHash, fcmToken and firebaseUid
+ * Sensitive fields (master context 6.6): fcmToken and firebaseUid
  * must never be exposed to any client or logged. They are `select: false` so
  * they are excluded from query results by default and stripped again in toJSON
  * as a second line of defence.
  *
  * Auth: identity is verified by Firebase (Google / email-password); the backend
  * verifies the Firebase ID token and mints its own JWT. `firebaseUid` links the
- * account to Firebase. `passwordHash` is legacy/optional - Firebase-provisioned
- * accounts have no local password (credentials owned by Firebase).
+ * account to Firebase. Credentials are owned solely by Firebase.
  */
 @Schema({
   collection: 'users',
@@ -30,7 +29,6 @@ export type UserDocument = HydratedDocument<User>;
   toJSON: {
     virtuals: true,
     transform: (_doc, ret: Record<string, unknown>) => {
-      delete ret.passwordHash;
       delete ret.fcmToken;
       delete ret.firebaseUid;
       delete ret.__v;
@@ -47,14 +45,6 @@ export class User {
     index: true,
   })
   email!: string;
-
-  /**
-   * bcrypt hash of a local password. Optional: Firebase-provisioned accounts do
-   * not have one. Retained for backward compatibility during the Firebase
-   * migration; the local password flow is retired once all clients migrate.
-   */
-  @Prop({ required: false, select: false })
-  passwordHash?: string;
 
   /** Firebase Auth UID - unique, sparse (legacy rows may not have one yet). */
   @Prop({ required: false, unique: true, sparse: true, select: false })
