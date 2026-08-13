@@ -5,7 +5,10 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  Res,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type { Response } from 'express';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -24,6 +27,7 @@ import {
   FirebaseAuthDto,
   FirebaseOnboardBuyerDto,
   FirebaseOnboardFarmerDto,
+  FirebaseOnboardFinancialPartnerDto,
   FirebaseOnboardTransporterDto,
   LoginDto,
   RegisterBuyerDto,
@@ -37,7 +41,10 @@ import {
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly configService: ConfigService,
+  ) {}
 
   @Public()
   @Post('register/farmer')
@@ -190,6 +197,126 @@ export class AuthController {
     return this.authService.onboardTransporterWithFirebase(dto);
   }
 
+  @Public()
+  @Post('firebase/onboard/financial-partner')
+  @ApiOperation({
+    summary:
+      'Onboard an allowlisted financial partner for a verified Firebase identity',
+  })
+  @ApiResponse({ status: 201, type: AuthResultDto })
+  @ApiErrorResponses(400, 401, 403, 409)
+  onboardFinancialPartnerWithFirebase(
+    @Body() dto: FirebaseOnboardFinancialPartnerDto,
+  ): Promise<AuthResultDto> {
+    return this.authService.onboardFinancialPartnerWithFirebase(dto);
+  }
+
+  @Public()
+  @Post('web/session')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Create an HTTP-only Firebase web session for a verified identity',
+    description:
+      'Sets the Firebase Admin session cookie and returns only the sanitised Farm2Fork user. No backend JWT is returned to browser JavaScript.',
+  })
+  @ApiResponse({ status: 200, type: AuthUserDto })
+  @ApiErrorResponses(400, 401, 403, 409)
+  async createWebSession(
+    @Body() dto: FirebaseAuthDto,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<AuthUserDto> {
+    const result = await this.authService.createWebSession(dto.idToken);
+    this.setWebSessionCookie(response, result.sessionCookie);
+    return result.user;
+  }
+
+  @Public()
+  @Post('web/onboard/farmer')
+  @ApiOperation({
+    summary: 'Onboard a verified Firebase farmer and create a web session',
+  })
+  @ApiResponse({ status: 201, type: AuthUserDto })
+  @ApiErrorResponses(400, 401, 403, 409)
+  async onboardFarmerForWeb(
+    @Body() dto: FirebaseOnboardFarmerDto,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<AuthUserDto> {
+    const result = await this.authService.onboardFarmerForWeb(dto);
+    this.setWebSessionCookie(response, result.sessionCookie);
+    return result.user;
+  }
+
+  @Public()
+  @Post('web/onboard/buyer')
+  @ApiOperation({
+    summary: 'Onboard a verified Firebase buyer and create a web session',
+  })
+  @ApiResponse({ status: 201, type: AuthUserDto })
+  @ApiErrorResponses(400, 401, 403, 409)
+  async onboardBuyerForWeb(
+    @Body() dto: FirebaseOnboardBuyerDto,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<AuthUserDto> {
+    const result = await this.authService.onboardBuyerForWeb(dto);
+    this.setWebSessionCookie(response, result.sessionCookie);
+    return result.user;
+  }
+
+  @Public()
+  @Post('web/onboard/transporter')
+  @ApiOperation({
+    summary: 'Onboard a verified Firebase transporter and create a web session',
+  })
+  @ApiResponse({ status: 201, type: AuthUserDto })
+  @ApiErrorResponses(400, 401, 403, 409)
+  async onboardTransporterForWeb(
+    @Body() dto: FirebaseOnboardTransporterDto,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<AuthUserDto> {
+    const result = await this.authService.onboardTransporterForWeb(dto);
+    this.setWebSessionCookie(response, result.sessionCookie);
+    return result.user;
+  }
+
+  @Public()
+  @Post('web/onboard/financial-partner')
+  @ApiOperation({
+    summary:
+      'Onboard an allowlisted financial partner and create a web session',
+  })
+  @ApiResponse({ status: 201, type: AuthUserDto })
+  @ApiErrorResponses(400, 401, 403, 409)
+  async onboardFinancialPartnerForWeb(
+    @Body() dto: FirebaseOnboardFinancialPartnerDto,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<AuthUserDto> {
+    const result = await this.authService.onboardFinancialPartnerForWeb(dto);
+    this.setWebSessionCookie(response, result.sessionCookie);
+    return result.user;
+  }
+
+  @Public()
+  @Post('web/logout')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Clear the HTTP-only Firebase web session cookie' })
+  @ApiResponse({ status: 200, schema: { example: { loggedOut: true } } })
+  @ApiErrorResponses(403)
+  logoutWebSession(@Res({ passthrough: true }) response: Response): {
+    loggedOut: true;
+  } {
+    const secure = this.configService.get<boolean>(
+      'WEB_SESSION_COOKIE_SECURE',
+      true,
+    );
+    response.clearCookie(this.webSessionCookieName(), {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure,
+      path: '/',
+    });
+    return { loggedOut: true };
+  }
+
   @Get('me')
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Get the currently authenticated user' })
@@ -197,5 +324,30 @@ export class AuthController {
   @ApiErrorResponses(401)
   me(@CurrentUser() user: RequestUser): Promise<AuthUserDto> {
     return this.authService.getCurrentUser(user.id);
+  }
+
+  private setWebSessionCookie(response: Response, value: string): void {
+    const secure = this.configService.get<boolean>(
+      'WEB_SESSION_COOKIE_SECURE',
+      true,
+    );
+    const ttlSeconds = this.configService.get<number>(
+      'WEB_SESSION_TTL_SECONDS',
+      86_400,
+    );
+    response.cookie(this.webSessionCookieName(), value, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure,
+      path: '/',
+      maxAge: ttlSeconds * 1_000,
+    });
+  }
+
+  private webSessionCookieName(): string {
+    return this.configService.get<string>(
+      'WEB_SESSION_COOKIE_NAME',
+      'f2f_session',
+    );
   }
 }

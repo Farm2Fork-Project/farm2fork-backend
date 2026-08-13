@@ -21,12 +21,22 @@ export function createSwaggerDocument(
       },
       'JWT-auth',
     )
+    .addCookieAuth(
+      'f2f_session',
+      {
+        type: 'apiKey',
+        in: 'cookie',
+        name: 'f2f_session',
+        description: 'Firebase Admin HTTP-only web session cookie',
+      },
+      'Firebase-session',
+    )
     .addServer(`http://localhost:${port}`, 'Local Development')
     .addServer('https://api.farm2fork.com', 'Production')
     .addTag('Health', 'Application health check endpoints')
     .addTag(
       'Auth',
-      'Firebase sign-in, onboarding, registration, login, email verification and password reset',
+      'Firebase sign-in, onboarding, and secure web/mobile sessions',
     )
     .addTag('Marketplace', 'Product listings, search, filtering and QR codes')
     .addTag('Orders', 'Order placement, listing and cancellation')

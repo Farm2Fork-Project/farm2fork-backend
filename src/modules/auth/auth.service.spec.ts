@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { ConflictException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 import { getModelToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
 import * as bcrypt from 'bcrypt';
@@ -13,6 +14,7 @@ import { BusinessType } from './schemas/buyer-profile.schema';
 import { BuyerProfile } from './schemas/buyer-profile.schema';
 import { FarmerProfile } from './schemas/farmer-profile.schema';
 import { TransporterProfile } from './schemas/transporter-profile.schema';
+import { FinancialPartnerProfile } from './schemas/financial-partner-profile.schema';
 import { User } from './schemas/user.schema';
 
 /** Minimal awaitable-with-exec stand-in for a Mongoose query. */
@@ -63,7 +65,12 @@ describe('AuthService', () => {
       set: jest.fn().mockReturnValue(Promise.resolve('OK')),
       del: jest.fn().mockReturnValue(Promise.resolve(1)),
     };
-    firebaseAuth = { verifyIdToken: jest.fn() };
+    firebaseAuth = {
+      verifyIdToken: jest.fn(),
+      createSessionCookie: jest
+        .fn()
+        .mockResolvedValue('firebase.session.cookie'),
+    };
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
@@ -75,9 +82,21 @@ describe('AuthService', () => {
           provide: getModelToken(TransporterProfile.name),
           useValue: transporterModel,
         },
+        {
+          provide: getModelToken(FinancialPartnerProfile.name),
+          useValue: { exists: jest.fn(), create: jest.fn() },
+        },
         { provide: JwtService, useValue: jwt },
         { provide: RedisService, useValue: redis },
         { provide: FirebaseAuthService, useValue: firebaseAuth },
+        {
+          provide: ConfigService,
+          useValue: new ConfigService({
+            ADMIN_EMAIL_ALLOWLIST: 'admin@example.com',
+            FINANCIAL_PARTNER_EMAIL_ALLOWLIST: 'finance@example.com',
+            WEB_SESSION_TTL_SECONDS: 86_400,
+          }),
+        },
       ],
     }).compile();
 
@@ -330,6 +349,54 @@ describe('AuthService', () => {
       expect(legacy.save).not.toHaveBeenCalled();
     });
 
+    it('rejects an unverified Firebase identity before it can sign in', async () => {
+      firebaseAuth.verifyIdToken.mockResolvedValue({
+        ...identity,
+        emailVerified: false,
+      });
+      userModel.findOne.mockReturnValue(
+        query(makeUser({ firebaseUid: 'fb-uid-1' })),
+      );
+
+      await expect(
+        service.signInWithFirebase('id-token'),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          code: 'EMAIL_VERIFICATION_REQUIRED',
+        }),
+      });
+    });
+
+    it('provisions an allowlisted admin on first verified Firebase sign-in', async () => {
+      firebaseAuth.verifyIdToken.mockResolvedValue({
+        ...identity,
+        email: 'admin@example.com',
+      });
+      userModel.findOne
+        .mockReturnValueOnce(query(null))
+        .mockReturnValueOnce(query(null));
+      userModel.create.mockResolvedValue(
+        makeUser({
+          email: 'admin@example.com',
+          role: UserRole.Admin,
+          isVerified: true,
+        }),
+      );
+
+      await expect(
+        service.signInWithFirebase('id-token'),
+      ).resolves.toMatchObject({
+        user: { email: 'admin@example.com', role: UserRole.Admin },
+      });
+      expect(userModel.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'admin@example.com',
+          role: UserRole.Admin,
+          firebaseUid: 'fb-uid-1',
+        }),
+      );
+    });
+
     it('signals ONBOARDING_REQUIRED when no account exists', async () => {
       firebaseAuth.verifyIdToken.mockResolvedValue(identity);
       userModel.findOne
@@ -397,6 +464,22 @@ describe('AuthService', () => {
       await expect(
         service.onboardFarmerWithFirebase(dto),
       ).rejects.toBeInstanceOf(ConflictException);
+      expect(userModel.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unverified Firebase identity before creating a profile', async () => {
+      firebaseAuth.verifyIdToken.mockResolvedValue({
+        ...identity,
+        emailVerified: false,
+      });
+
+      await expect(
+        service.onboardFarmerWithFirebase(dto),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          code: 'EMAIL_VERIFICATION_REQUIRED',
+        }),
+      });
       expect(userModel.create).not.toHaveBeenCalled();
     });
   });

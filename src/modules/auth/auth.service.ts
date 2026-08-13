@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { Model } from 'mongoose';
@@ -20,6 +21,7 @@ import {
   ConfirmPasswordResetDto,
   FirebaseOnboardBuyerDto,
   FirebaseOnboardFarmerDto,
+  FirebaseOnboardFinancialPartnerDto,
   FirebaseOnboardTransporterDto,
   LoginDto,
   RegisterBuyerDto,
@@ -39,6 +41,10 @@ import {
   TransporterProfile,
   TransporterProfileDocument,
 } from './schemas/transporter-profile.schema';
+import {
+  FinancialPartnerProfile,
+  FinancialPartnerProfileDocument,
+} from './schemas/financial-partner-profile.schema';
 import { User, UserDocument } from './schemas/user.schema';
 
 const BCRYPT_ROUNDS = 10;
@@ -58,6 +64,17 @@ const SELF_SERVICE_ROLES: UserRole[] = [
   UserRole.Transporter,
 ];
 
+const EMAIL_VERIFICATION_REQUIRED = {
+  statusCode: 401,
+  code: 'EMAIL_VERIFICATION_REQUIRED',
+  message: 'Verify your Firebase email before continuing.',
+} as const;
+
+export interface WebSessionResult {
+  user: AuthUserDto;
+  sessionCookie: string;
+}
+
 interface MongoDuplicateKeyError {
   code?: number;
   keyPattern?: Record<string, unknown>;
@@ -75,9 +92,12 @@ export class AuthService {
     private readonly buyerProfileModel: Model<BuyerProfileDocument>,
     @InjectModel(TransporterProfile.name)
     private readonly transporterProfileModel: Model<TransporterProfileDocument>,
+    @InjectModel(FinancialPartnerProfile.name)
+    private readonly financialPartnerProfileModel: Model<FinancialPartnerProfileDocument>,
     private readonly jwtService: JwtService,
     private readonly redisService: RedisService,
     private readonly firebaseAuthService: FirebaseAuthService,
+    private readonly configService: ConfigService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -207,25 +227,13 @@ export class AuthService {
 
   /** Sign in a returning user with a verified Firebase identity. */
   async signInWithFirebase(idToken: string): Promise<AuthResultDto> {
-    const identity = await this.firebaseAuthService.verifyIdToken(idToken);
-    const user = await this.resolveFirebaseUser(identity);
+    return this.buildAuthResult(await this.resolveFirebaseSignIn(idToken));
+  }
 
-    if (!user) {
-      // Known Firebase identity, but no Farm2Fork account yet: the client must
-      // onboard (choose a role, provide profile/KYC). `code` lets clients route.
-      throw new ConflictException({
-        statusCode: 409,
-        code: 'ONBOARDING_REQUIRED',
-        message:
-          'No Farm2Fork account is linked to this identity. Complete onboarding to choose a role.',
-      });
-    }
-
-    if (!user.isActive) {
-      throw new UnauthorizedException('Account has been deactivated');
-    }
-
-    return this.buildAuthResult(user);
+  /** Web-only transport: returns a session cookie, never a backend JWT. */
+  async createWebSession(idToken: string): Promise<WebSessionResult> {
+    const user = await this.resolveFirebaseSignIn(idToken);
+    return this.createWebSessionForUser(user, idToken);
   }
 
   async onboardFarmerWithFirebase(
@@ -313,6 +321,65 @@ export class AuthService {
       }),
     );
     return this.buildAuthResult(user);
+  }
+
+  async onboardFinancialPartnerWithFirebase(
+    dto: FirebaseOnboardFinancialPartnerDto,
+  ): Promise<AuthResultDto> {
+    const identity = await this.beginPrivilegedFirebaseOnboarding(
+      dto.idToken,
+      UserRole.FinancialPartner,
+    );
+    if (await this.financialPartnerProfileModel.exists({ cnic: dto.cnic })) {
+      throw new ConflictException('CNIC is already registered');
+    }
+
+    const user = await this.createFirebaseUser(
+      identity,
+      UserRole.FinancialPartner,
+      dto.phone,
+    );
+    await this.createProfileOrRollback(user, () =>
+      this.financialPartnerProfileModel.create({
+        userId: user._id,
+        institutionName: dto.institutionName,
+        institutionType: dto.institutionType,
+        licenseNumber: dto.licenseNumber,
+        cnic: dto.cnic,
+        designation: dto.designation,
+        approvalLimit: dto.approvalLimit,
+        serviceRegions: dto.serviceRegions ?? [],
+      }),
+    );
+    return this.buildAuthResult(user);
+  }
+
+  async onboardFarmerForWeb(
+    dto: FirebaseOnboardFarmerDto,
+  ): Promise<WebSessionResult> {
+    const result = await this.onboardFarmerWithFirebase(dto);
+    return this.createWebSessionForAuthResult(result, dto.idToken);
+  }
+
+  async onboardBuyerForWeb(
+    dto: FirebaseOnboardBuyerDto,
+  ): Promise<WebSessionResult> {
+    const result = await this.onboardBuyerWithFirebase(dto);
+    return this.createWebSessionForAuthResult(result, dto.idToken);
+  }
+
+  async onboardTransporterForWeb(
+    dto: FirebaseOnboardTransporterDto,
+  ): Promise<WebSessionResult> {
+    const result = await this.onboardTransporterWithFirebase(dto);
+    return this.createWebSessionForAuthResult(result, dto.idToken);
+  }
+
+  async onboardFinancialPartnerForWeb(
+    dto: FirebaseOnboardFinancialPartnerDto,
+  ): Promise<WebSessionResult> {
+    const result = await this.onboardFinancialPartnerWithFirebase(dto);
+    return this.createWebSessionForAuthResult(result, dto.idToken);
   }
 
   // ---------------------------------------------------------------------------
@@ -430,6 +497,42 @@ export class AuthService {
     return null;
   }
 
+  private async resolveFirebaseSignIn(idToken: string): Promise<UserDocument> {
+    const identity = await this.firebaseAuthService.verifyIdToken(idToken);
+    this.assertVerifiedIdentity(identity);
+    const user = await this.resolveFirebaseUser(identity);
+
+    if (user) {
+      this.assertPrivilegedRoleAllowed(user, identity.email);
+      if (!user.isActive) {
+        throw new UnauthorizedException('Account has been deactivated');
+      }
+      return user;
+    }
+
+    if (this.isAllowlisted(identity.email, 'ADMIN_EMAIL_ALLOWLIST')) {
+      return this.createFirebaseUser(identity, UserRole.Admin);
+    }
+
+    if (
+      this.isAllowlisted(identity.email, 'FINANCIAL_PARTNER_EMAIL_ALLOWLIST')
+    ) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'PRIVILEGED_ONBOARDING_REQUIRED',
+        role: UserRole.FinancialPartner,
+        message: 'Complete the required financial partner profile to continue.',
+      });
+    }
+
+    throw new ConflictException({
+      statusCode: 409,
+      code: 'ONBOARDING_REQUIRED',
+      message:
+        'No Farm2Fork account is linked to this identity. Complete onboarding to choose a role.',
+    });
+  }
+
   /** Verify the Firebase token and guard first-time onboarding preconditions. */
   private async beginFirebaseOnboarding(
     idToken: string,
@@ -437,7 +540,30 @@ export class AuthService {
   ): Promise<FirebaseIdentity> {
     this.assertSelfServiceRole(role);
     const identity = await this.firebaseAuthService.verifyIdToken(idToken);
+    this.assertVerifiedIdentity(identity);
 
+    return this.assertFirebaseIdentityIsUnlinked(identity);
+  }
+
+  private async beginPrivilegedFirebaseOnboarding(
+    idToken: string,
+    role: UserRole.FinancialPartner,
+  ): Promise<FirebaseIdentity> {
+    const identity = await this.firebaseAuthService.verifyIdToken(idToken);
+    this.assertVerifiedIdentity(identity);
+    if (
+      !this.isAllowlisted(identity.email, 'FINANCIAL_PARTNER_EMAIL_ALLOWLIST')
+    ) {
+      throw new ForbiddenException(
+        'This email is not allowlisted as a financial partner',
+      );
+    }
+    return this.assertFirebaseIdentityIsUnlinked(identity);
+  }
+
+  private async assertFirebaseIdentityIsUnlinked(
+    identity: FirebaseIdentity,
+  ): Promise<FirebaseIdentity> {
     const email = identity.email.toLowerCase().trim();
     const [existingByUid, existingByEmail] = await Promise.all([
       this.userModel.exists({ firebaseUid: identity.uid }),
@@ -447,6 +573,68 @@ export class AuthService {
       throw new ConflictException('This account is already registered');
     }
     return identity;
+  }
+
+  private assertVerifiedIdentity(identity: FirebaseIdentity): void {
+    if (!identity.emailVerified) {
+      throw new UnauthorizedException(EMAIL_VERIFICATION_REQUIRED);
+    }
+  }
+
+  private isAllowlisted(
+    email: string,
+    key: 'ADMIN_EMAIL_ALLOWLIST' | 'FINANCIAL_PARTNER_EMAIL_ALLOWLIST',
+  ): boolean {
+    const normalizedEmail = email.toLowerCase().trim();
+    const entries = (this.configService.get<string>(key) ?? '')
+      .split(',')
+      .map((entry) => entry.toLowerCase().trim())
+      .filter(Boolean);
+    return entries.includes(normalizedEmail);
+  }
+
+  private assertPrivilegedRoleAllowed(user: UserDocument, email: string): void {
+    if (
+      user.role === UserRole.Admin &&
+      !this.isAllowlisted(email, 'ADMIN_EMAIL_ALLOWLIST')
+    ) {
+      throw new UnauthorizedException('Admin access is no longer allowlisted');
+    }
+    if (
+      user.role === UserRole.FinancialPartner &&
+      !this.isAllowlisted(email, 'FINANCIAL_PARTNER_EMAIL_ALLOWLIST')
+    ) {
+      throw new UnauthorizedException(
+        'Financial partner access is no longer allowlisted',
+      );
+    }
+  }
+
+  private async createWebSessionForAuthResult(
+    result: AuthResultDto,
+    idToken: string,
+  ): Promise<WebSessionResult> {
+    const sessionCookie = await this.createWebSessionCookie(idToken);
+    return { user: result.user, sessionCookie };
+  }
+
+  private async createWebSessionForUser(
+    user: UserDocument,
+    idToken: string,
+  ): Promise<WebSessionResult> {
+    const sessionCookie = await this.createWebSessionCookie(idToken);
+    return { user: this.toAuthUser(user), sessionCookie };
+  }
+
+  private createWebSessionCookie(idToken: string): Promise<string> {
+    const ttlSeconds = this.configService.get<number>(
+      'WEB_SESSION_TTL_SECONDS',
+      86_400,
+    );
+    return this.firebaseAuthService.createSessionCookie(
+      idToken,
+      ttlSeconds * 1_000,
+    );
   }
 
   private async createFirebaseUser(

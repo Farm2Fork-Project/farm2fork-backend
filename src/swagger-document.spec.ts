@@ -1,5 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthController } from './modules/auth/auth.controller';
@@ -32,6 +33,7 @@ describe('createSwaggerDocument', () => {
       providers: [
         { provide: AppService, useValue: {} },
         { provide: AuthService, useValue: {} },
+        { provide: ConfigService, useValue: new ConfigService() },
         { provide: MarketplaceService, useValue: {} },
         { provide: OrderService, useValue: {} },
         { provide: PaymentService, useValue: {} },
@@ -83,6 +85,23 @@ describe('createSwaggerDocument', () => {
       'post',
       '201',
     );
+    expectPublic(
+      document,
+      '/api/auth/firebase/onboard/financial-partner',
+      'post',
+      '201',
+    );
+    expectPublic(document, '/api/auth/web/session', 'post', '200');
+    expectPublic(document, '/api/auth/web/onboard/farmer', 'post', '201');
+    expectPublic(document, '/api/auth/web/onboard/buyer', 'post', '201');
+    expectPublic(document, '/api/auth/web/onboard/transporter', 'post', '201');
+    expectPublic(
+      document,
+      '/api/auth/web/onboard/financial-partner',
+      'post',
+      '201',
+    );
+    expectPublic(document, '/api/auth/web/logout', 'post', '200');
     expectPublicError(
       document,
       '/api/payments/webhook/{gateway}',
