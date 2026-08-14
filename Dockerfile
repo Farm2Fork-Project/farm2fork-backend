@@ -4,7 +4,9 @@ RUN corepack enable
 
 FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=farm2fork-corepack,target=/root/.cache/node/corepack \
+    --mount=type=cache,id=farm2fork-pnpm-store,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
 
 FROM deps AS build
 COPY . .
@@ -12,7 +14,9 @@ RUN rm -f tsconfig.build.tsbuildinfo && pnpm build
 
 FROM base AS prod-deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile --prod
+RUN --mount=type=cache,id=farm2fork-corepack,target=/root/.cache/node/corepack \
+    --mount=type=cache,id=farm2fork-pnpm-store,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile --prod
 
 FROM deps AS development
 COPY . .

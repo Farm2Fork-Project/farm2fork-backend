@@ -73,7 +73,7 @@
 
 **Produces:** Documented real-environment test matrix covering Firebase email verification, existing and new Google identity, backend role-derived onboarding, browser cookie session restoration, and mobile JWT restoration.
 
-- [ ] **Step 1: Verify backend and web Docker configuration share the exact allowed origin and Firebase project**
+- [x] **Step 1: Verify backend and web Docker configuration share the exact allowed origin and Firebase project**
 - [ ] **Step 2: Execute non-destructive authenticated smoke requests when Firebase credentials and the backend runtime are available**
 - [x] **Step 3: Record executed checks, blocked external checks, and required manual device/browser checks**
 - [x] **Step 4: Commit the verification record**
