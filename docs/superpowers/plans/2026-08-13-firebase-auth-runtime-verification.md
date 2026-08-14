@@ -2,7 +2,7 @@
 
 Date: 2026-08-13
 
-## Completed static checks
+## Completed static and runtime checks
 
 - Backend Compose accepts a complete, non-secret placeholder configuration via
   `docker compose config -q`.
@@ -12,13 +12,28 @@ Date: 2026-08-13
 - Web production build passed with all required `NEXT_PUBLIC_FIREBASE_*` build
   arguments present, and the web test suite passed (36 tests).
 - Mobile static analysis and the full Flutter suite passed (79 tests).
+- The current backend runtime initialized Firebase Admin for project
+  `farm2fork-2a5b9`, connected to MongoDB Atlas and local Redis, and served
+  Swagger on a temporary Docker port (`3002`).
+- Browser CORS preflight from `http://localhost:3001` returned `204` with that
+  exact allowed origin, credentials enabled, and the CSRF header allowed.
+- The mobile Firebase exchange and web cookie-session exchange each rejected a
+  deliberately invalid Firebase token with `401`; valid-origin browser requests
+  passed CSRF/origin validation before reaching Firebase. Missing CSRF or a
+  wrong origin returned `403`.
 
 ## Current local-runtime blocker
 
-This checkout's backend `.env` currently supplies only `PORT`; the web checkout
-has no local `NEXT_PUBLIC_FIREBASE_*` environment file. No backend Compose
-containers were running during this check. Therefore a real Firebase sign-in
-and an authenticated API smoke test were not executed.
+The backend and ignored local web environment files now contain the required
+values. A stale development image/anonymous `node_modules` volume initially
+lacked `cookie-parser`; the live smoke container uses the verified current
+dependency tree while the clean image rebuild downloads dependencies. The
+Dockerfile now pins pnpm and caches Corepack/pnpm downloads so later clean
+builds resume reliably.
+
+A real Firebase identity was intentionally not created or signed in during this
+check. Therefore email delivery, Google consent, role onboarding, and a
+successful authenticated session still require the manual matrix below.
 
 ## Required runtime variables
 
