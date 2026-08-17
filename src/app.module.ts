@@ -77,9 +77,9 @@ const featureModules = [
           .default(5_000),
         FABRIC_CHANNEL_NAME: Joi.string().default('farm2forkchannel'),
         FABRIC_CHAINCODE_NAME: Joi.string().default('farm2fork-chaincode'),
-        FABRIC_MSP_ID: Joi.string().default('Org1MSP'),
-        FABRIC_PEER_ENDPOINT: Joi.string().default('localhost:7051'),
-        FABRIC_PEER_HOST_ALIAS: Joi.string().default('peer0.org1.example.com'),
+        FABRIC_MSP_ID: Joi.string().default('Farm2ForkMSP'),
+        FABRIC_PEER_ENDPOINT: Joi.string().default('peer0.farm2fork.com:7051'),
+        FABRIC_PEER_HOST_ALIAS: Joi.string().default('peer0.farm2fork.com'),
         FABRIC_TLS_ROOT_CERT_PATH: Joi.string().when(
           'BLOCKCHAIN_WORKER_ENABLED',
           {

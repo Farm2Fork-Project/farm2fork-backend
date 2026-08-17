@@ -1,5 +1,6 @@
 FROM node:24.16.0-alpine3.23 AS base
 WORKDIR /app
+RUN apk add --no-cache python3 make g++
 RUN corepack enable
 
 FROM base AS deps
