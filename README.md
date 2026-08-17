@@ -57,6 +57,19 @@ $ pnpm run test:e2e
 $ pnpm run test:cov
 ```
 
+## Docker E2E tests on Apple Silicon
+
+The application containers remain Alpine-based. The E2E suite uses
+`mongodb-memory-server`, whose Debian 12 Community Server binary is x86_64-only.
+On Apple Silicon, run the dedicated Debian test target through Docker's amd64
+emulation instead of changing the production image:
+
+```bash
+$ docker build --platform linux/amd64 --target test -t farm2fork-backend-e2e-test .
+$ docker run --rm --platform linux/amd64 farm2fork-backend-e2e-test \
+  pnpm test:e2e -- payment.e2e-spec.ts shipment.e2e-spec.ts --runInBand
+```
+
 ## Deployment
 
 When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
