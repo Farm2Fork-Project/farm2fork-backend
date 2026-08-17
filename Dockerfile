@@ -24,6 +24,19 @@ COPY . .
 EXPOSE 3000
 CMD ["pnpm", "start:dev"]
 
+FROM node:24.16.0-bookworm-slim AS test
+WORKDIR /app
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/* \
+    && corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN --mount=type=cache,id=farm2fork-corepack,target=/root/.cache/node/corepack \
+    --mount=type=cache,id=farm2fork-pnpm-store,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
+COPY . .
+CMD ["pnpm", "test:e2e", "--", "--runInBand"]
+
 FROM node:24.16.0-alpine3.23 AS production
 WORKDIR /app
 RUN corepack enable
