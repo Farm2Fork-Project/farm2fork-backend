@@ -41,6 +41,15 @@ describe('blockchainConfig', () => {
     expect(
       moduleRef.get(ConfigService).get<string>('blockchain.chaincodeName'),
     ).toBe('farm2fork-chaincode');
+    expect(moduleRef.get(ConfigService).get<string>('blockchain.mspId')).toBe(
+      'Farm2ForkMSP',
+    );
+    expect(
+      moduleRef.get(ConfigService).get<string>('blockchain.peerEndpoint'),
+    ).toBe('peer0.farm2fork.com:7051');
+    expect(
+      moduleRef.get(ConfigService).get<string>('blockchain.peerHostAlias'),
+    ).toBe('peer0.farm2fork.com');
 
     await moduleRef.close();
   });

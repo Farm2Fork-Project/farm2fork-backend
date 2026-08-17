@@ -32,6 +32,9 @@ services:
     container_name: f2f-worker
     command: pnpm start:worker:dev
     environment:
+      # The anonymous /app/node_modules volume is initialised by pnpm on first
+      # start; CI prevents its non-interactive purge confirmation from exiting.
+      CI: 'true'
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       BLOCKCHAIN_WORKER_ENABLED: 'true'

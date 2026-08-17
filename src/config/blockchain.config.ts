@@ -26,10 +26,9 @@ export const blockchainConfig = registerAs(
     ),
     channelName: process.env.FABRIC_CHANNEL_NAME ?? 'farm2forkchannel',
     chaincodeName: process.env.FABRIC_CHAINCODE_NAME ?? 'farm2fork-chaincode',
-    mspId: process.env.FABRIC_MSP_ID ?? 'Org1MSP',
-    peerEndpoint: process.env.FABRIC_PEER_ENDPOINT ?? 'localhost:7051',
-    peerHostAlias:
-      process.env.FABRIC_PEER_HOST_ALIAS ?? 'peer0.org1.example.com',
+    mspId: process.env.FABRIC_MSP_ID ?? 'Farm2ForkMSP',
+    peerEndpoint: process.env.FABRIC_PEER_ENDPOINT ?? 'peer0.farm2fork.com:7051',
+    peerHostAlias: process.env.FABRIC_PEER_HOST_ALIAS ?? 'peer0.farm2fork.com',
     tlsRootCertPath: process.env.FABRIC_TLS_ROOT_CERT_PATH,
     identityCertPath: process.env.FABRIC_IDENTITY_CERT_PATH,
     identityKeyPath: process.env.FABRIC_IDENTITY_KEY_PATH,

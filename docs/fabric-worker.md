@@ -38,6 +38,12 @@ blockchain network uses a different external Docker network name.
 The local Fabric defaults are channel `farm2forkchannel` and chaincode
 `farm2fork-chaincode`.
 
+`farm2fork-backend/.env.example` now lists every non-secret Fabric variable.
+Keep `BLOCKCHAIN_WORKER_ENABLED=false` for the HTTP `backend` service; Compose
+sets it to `true` only for `backend-worker`. Do not set the three
+`FABRIC_*_PATH` variables in `.env`: Compose derives their in-container values
+from the read-only `FABRIC_CRYPTO_HOST_PATH` mount.
+
 ## Verified live boundary
 
 On 2026-08-11, the local worker was verified against the user-provided Atlas
