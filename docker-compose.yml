@@ -17,7 +17,7 @@ services:
       WEB_SESSION_COOKIE_NAME: ${WEB_SESSION_COOKIE_NAME:?WEB_SESSION_COOKIE_NAME is required}
       WEB_SESSION_COOKIE_SECURE: ${WEB_SESSION_COOKIE_SECURE:?WEB_SESSION_COOKIE_SECURE is required}
     ports:
-      - '3000:3000'
+      - '3002:3000'
     depends_on:
       redis:
         condition: service_healthy

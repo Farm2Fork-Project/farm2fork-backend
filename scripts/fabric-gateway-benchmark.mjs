@@ -16,19 +16,19 @@ const base = `${cryptoRoot}/peerOrganizations/farm2fork.com`;
 
 if (!Number.isInteger(operations) || operations < 1 || !Number.isInteger(concurrency) || concurrency < 1) throw new Error('BENCHMARK_OPERATIONS and BENCHMARK_CONCURRENCY must be positive integers');
 const [tls, cert, key] = await Promise.all([
-  readFile(`${base}/peers/peer0.farm2fork.com/tls/ca.crt`),
-  readFile(`${base}/users/Admin@farm2fork.com/msp/signcerts/Admin@farm2fork.com-cert.pem`),
-  readFile(`${base}/users/Admin@farm2fork.com/msp/keystore/priv_sk`),
+    readFile(`${base}/peers/peer0.farm2fork.com/tls/ca.crt`),
+    readFile(`${base}/users/Admin@farm2fork.com/msp/signcerts/Admin@farm2fork.com-cert.pem`),
+    readFile(`${base}/users/Admin@farm2fork.com/msp/keystore/priv_sk`),
 ]);
 const client = new grpc.Client(peer, grpc.credentials.createSsl(tls), { 'grpc.ssl_target_name_override': alias });
 const gateway = connect({ client, identity: { mspId, credentials: cert }, signer: signers.newPrivateKeySigner(createPrivateKey(key)) });
 const contract = gateway.getNetwork(channel).getContract(chaincode);
 const runId = `gateway-${randomUUID()}`;
 const build = (i, event, model, role) => [`${runId}-${event}-${i}`, model === 'Product' ? `${runId}-product-${i}` : `${runId}-shipment-${i}`, model, `${runId}-product-${i}`, `${runId}-farmer-${i}`, event, 'Lahore, Punjab', `${runId}-${role}-${i}`, role, new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString()];
-const run = async (name, fn) => { const start=performance.now(), lat=[]; let n=0; await Promise.all(Array.from({length:Math.min(concurrency,operations)}, async()=>{while(n<operations){const i=++n,t=performance.now();await fn(i);lat.push(performance.now()-t)}})); lat.sort((a,b)=>a-b); return {name,count:operations,elapsedMs:performance.now()-start,throughputTps:operations*1000/(performance.now()-start),p50Ms:lat[Math.ceil(lat.length*.5)-1],p95Ms:lat[Math.ceil(lat.length*.95)-1]}; };
-const submit = async args => assertSuccessfulCommit(await (await contract.submitAsync('RecordSupplyChainEvent',{arguments:args,endorsingOrganizations:[mspId]})).getStatus());
-const listing = await run('Listing Event', i => submit(build(i,'listed','Product','farmer')));
-const shipment = await run('Shipment Event', i => submit(build(i,'shipment_in_transit','Shipment','transporter')));
+const run = async (name, fn) => { const start = performance.now(), lat = []; let n = 0; await Promise.all(Array.from({ length: Math.min(concurrency, operations) }, async () => { while (n < operations) { const i = ++n, t = performance.now(); await fn(i); lat.push(performance.now() - t) } })); lat.sort((a, b) => a - b); return { name, count: operations, elapsedMs: performance.now() - start, throughputTps: operations * 1000 / (performance.now() - start), p50Ms: lat[Math.ceil(lat.length * .5) - 1], p95Ms: lat[Math.ceil(lat.length * .95) - 1] }; };
+const submit = async args => assertSuccessfulCommit(await (await contract.submitAsync('RecordSupplyChainEvent', { arguments: args, endorsingOrganizations: [mspId] })).getStatus());
+const listing = await run('Listing Event', i => submit(build(i, 'listed', 'Product', 'farmer')));
+const shipment = await run('Shipment Event', i => submit(build(i, 'shipment_in_transit', 'Shipment', 'transporter')));
 const query = await run('Product History Query', i => contract.evaluateTransaction('GetTransactionsByProductId', `${runId}-product-${i}`));
-const result={runId,measuredAt:new Date().toISOString(),path:'Fabric Gateway gRPC/TLS direct submission or evaluation',operations,concurrency,rows:[listing,shipment,query]};
-await mkdir('benchmark/results',{recursive:true}); await writeFile(`benchmark/results/${runId}.json`,JSON.stringify(result,null,2)); console.log(JSON.stringify(result,null,2)); gateway.close(); client.close();
+const result = { runId, measuredAt: new Date().toISOString(), path: 'Fabric Gateway gRPC/TLS direct submission or evaluation', operations, concurrency, rows: [listing, shipment, query] };
+await mkdir('benchmark/results', { recursive: true }); await writeFile(`benchmark/results/${runId}.json`, JSON.stringify(result, null, 2)); console.log(JSON.stringify(result, null, 2)); gateway.close(); client.close();
