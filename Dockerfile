@@ -27,7 +27,7 @@ CMD ["pnpm", "start:dev"]
 FROM node:24.16.0-bookworm-slim AS test
 WORKDIR /app
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends python3 make g++ \
+    && apt-get install --yes --no-install-recommends python3 make g++ libcurl4 \
     && rm -rf /var/lib/apt/lists/* \
     && corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
