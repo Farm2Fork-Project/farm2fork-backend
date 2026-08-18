@@ -9,5 +9,9 @@ test('Dockerfile provides a Debian-based E2E test target', async () => {
     dockerfile,
     /FROM node:24\.16\.0-bookworm-slim AS test/,
   );
+  assert.match(
+    dockerfile,
+    /apt-get install --yes --no-install-recommends python3 make g\+\+ libcurl4/,
+  );
   assert.match(dockerfile, /CMD \["pnpm", "test:e2e", "--", "--runInBand"\]/);
 });
