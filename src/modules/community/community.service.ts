@@ -103,10 +103,22 @@ export class CommunityService {
     dto: CreatePostDto,
     images: UploadedImage[] = [],
   ): Promise<PostResponseDto> {
+    if (!Array.isArray(images)) {
+      throw new BadRequestException('Invalid images payload');
+    }
     if (images.length > MAX_POST_IMAGES) {
       throw new BadRequestException(`Attach at most ${MAX_POST_IMAGES} photos`);
     }
-    images.forEach((image) => this.storage.validate(image.buffer, 'image'));
+    images.forEach((image) => {
+      if (
+        !image ||
+        typeof image !== 'object' ||
+        !(image.buffer instanceof Buffer)
+      ) {
+        throw new BadRequestException('Invalid image file');
+      }
+      this.storage.validate(image.buffer, 'image');
+    });
     const urls: string[] = [];
     for (const image of images) {
       urls.push(
