@@ -21,6 +21,7 @@ import {
   BlockchainTxStatus,
   BlockchainTxType,
 } from '../src/modules/blockchain/schemas/blockchain-transaction.schema';
+import { FABRIC_GATEWAY_CLIENT } from '../src/modules/blockchain/interfaces/fabric-gateway-client.interface';
 import { MarketplaceService } from '../src/modules/marketplace/marketplace.service';
 import {
   Product,
@@ -76,6 +77,10 @@ describe('Product provenance: listing -> payment -> shipment -> public trace', (
         MarketplaceService,
         TransportService,
         TraceabilityService,
+        {
+          provide: FABRIC_GATEWAY_CLIENT,
+          useValue: { isAvailable: () => false, findByLedgerKey: jest.fn() },
+        },
         {
           provide: ConfigService,
           useValue: {
@@ -154,6 +159,7 @@ describe('Product provenance: listing -> payment -> shipment -> public trace', (
       totalEvents: 1,
       confirmedEvents: 0,
       originVerified: false,
+      ledgerCheck: 'unavailable',
     });
 
     // 2. The Fabric worker confirms the listing on the ledger.
@@ -239,6 +245,7 @@ describe('Product provenance: listing -> payment -> shipment -> public trace', (
       totalEvents: 3,
       confirmedEvents: 1,
       originVerified: true,
+      ledgerCheck: 'unavailable',
     });
 
     const serialized = JSON.stringify(trace);
