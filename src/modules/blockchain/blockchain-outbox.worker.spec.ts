@@ -16,6 +16,7 @@ describe('BlockchainOutboxWorker', () => {
   const outboxId = new Types.ObjectId();
   const model = { findOneAndUpdate: jest.fn(), updateOne: jest.fn() };
   const gateway: jest.Mocked<FabricGatewayClient> = {
+    isAvailable: jest.fn().mockReturnValue(true),
     findByLedgerKey: jest.fn(),
     submit: jest.fn(),
   };

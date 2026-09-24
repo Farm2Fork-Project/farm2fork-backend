@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
@@ -24,6 +25,7 @@ import { OrderService } from './order.service';
 import {
   CreateOrderDto,
   OrderListResponseDto,
+  OrderQuoteResponseDto,
   OrderResponseDto,
   QueryOrderDto,
 } from './dto';
@@ -48,6 +50,20 @@ export class OrderController {
     @Body() dto: CreateOrderDto,
   ): Promise<OrderResponseDto> {
     return this.orderService.create(user.id, dto);
+  }
+
+  @Post('quote')
+  @HttpCode(200)
+  @Roles(UserRole.Buyer)
+  @ApiOperation({
+    summary: 'Price a one-farmer cart before placing it',
+    description:
+      'Buyer only. Same body and validation as placing an order; returns the item total, platform fee, fixed delivery fee (priced from the farm pin to the drop-off pin) and grand total. Nothing is saved.',
+  })
+  @ApiOkResponse({ type: OrderQuoteResponseDto })
+  @ApiErrorResponses(400, 401, 403)
+  quote(@Body() dto: CreateOrderDto): Promise<OrderQuoteResponseDto> {
+    return this.orderService.quote(dto);
   }
 
   @Get()

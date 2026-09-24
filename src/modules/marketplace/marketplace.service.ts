@@ -3,19 +3,37 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
+import { ConfigService } from '@nestjs/config';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import {
+  Connection,
   FilterQuery,
   Model,
   SortOrder as MongooseSortOrder,
   Types,
 } from 'mongoose';
 import * as QRCode from 'qrcode';
+import { UserRole } from '../../common/enums/user-role.enum';
+import {
+  FarmerProfile,
+  FarmerProfileDocument,
+} from '../auth/schemas/farmer-profile.schema';
+import {
+  BlockchainReferenceModel,
+  BlockchainTransaction,
+  BlockchainTransactionDocument,
+  BlockchainTxStatus,
+  BlockchainTxType,
+} from '../blockchain/schemas/blockchain-transaction.schema';
 import {
   Product,
   ProductDocument,
   ProductStatus,
 } from './schemas/product.schema';
+import {
+  OriginLedgerStatus,
+  ProductFarmerSummaryDto,
+} from './dto/product-response.dto';
 import {
   CreateProductDto,
   ProductListResponseDto,
@@ -34,12 +52,44 @@ import {
  * traceability QR generation against the products collection (master context
  * 5.6). The first blockchain traceability record is referenced via
  * initialBlockchainRecordId - the retired name blockchainTxId is never used.
+ *
+ * Creating a listing also enqueues its `listed` supply-chain event in the
+ * blockchain outbox (master context 6.4) in the same transaction, so a
+ * product never exists without the first link of its provenance chain.
  */
+export const LISTED_EVENT = 'listed';
+export const UNKNOWN_LOCATION = 'Location not provided';
+const DEFAULT_TRACE_ORIGIN = 'https://farm2fork.com';
+
+/**
+ * Public trace URL encoded in every product QR. Points at the web app's
+ * public /trace/:id page (PUBLIC_TRACE_ORIGIN, falling back to
+ * WEB_APP_ORIGIN) so a phone camera scan opens a real page, and the mobile
+ * scanner can extract the product id from the last path segment.
+ */
+export function buildProductTraceUrl(
+  config: ConfigService,
+  productId: string,
+): string {
+  const origin =
+    config.get<string>('PUBLIC_TRACE_ORIGIN') ||
+    config.get<string>('WEB_APP_ORIGIN') ||
+    DEFAULT_TRACE_ORIGIN;
+  return `${origin.replace(/\/+$/, '')}/trace/${productId}`;
+}
+
 @Injectable()
 export class MarketplaceService {
   constructor(
     @InjectModel(Product.name)
     private readonly productModel: Model<ProductDocument>,
+    @InjectModel(BlockchainTransaction.name)
+    private readonly blockchainModel: Model<BlockchainTransactionDocument>,
+    @InjectModel(FarmerProfile.name)
+    private readonly farmerProfileModel: Model<FarmerProfileDocument>,
+    @InjectConnection()
+    private readonly connection: Connection,
+    private readonly config: ConfigService,
   ) {}
 
   async create(
@@ -48,25 +98,75 @@ export class MarketplaceService {
   ): Promise<ProductResponseDto> {
     // Pre-allocate the id so the QR trace URL can embed it before persistence.
     const id = new Types.ObjectId();
-    const created = await this.productModel.create({
-      _id: id,
-      farmerId: new Types.ObjectId(farmerId),
-      name: dto.name,
-      category: dto.category,
-      description: dto.description,
-      price: dto.price,
-      quantity: dto.quantity,
-      unit: dto.unit,
-      images: dto.images ?? [],
-      qualityGrade: dto.qualityGrade,
-      qrCode: this.buildTraceUrl(id.toHexString()),
-      status: ProductStatus.Active,
-    });
-    return this.toResponse(created);
+    const farmerObjectId = new Types.ObjectId(farmerId);
+    const location = await this.farmLocationLabel(farmerObjectId);
+    const listedAt = new Date();
+
+    const session = await this.connection.startSession();
+    try {
+      const created = await session.withTransaction(async () => {
+        const [listedEvent] = await this.blockchainModel.create(
+          [
+            {
+              type: BlockchainTxType.SupplyChainEvent,
+              referenceId: id,
+              referenceModel: BlockchainReferenceModel.Product,
+              payload: {
+                payment: null,
+                supplyChain: {
+                  productId: id,
+                  farmerId: farmerObjectId,
+                  eventType: LISTED_EVENT,
+                  location,
+                  actorId: farmerObjectId,
+                  actorRole: UserRole.Farmer,
+                  timestamp: listedAt,
+                },
+              },
+              status: BlockchainTxStatus.Pending,
+            },
+          ],
+          { session },
+        );
+        const [product] = await this.productModel.create(
+          [
+            {
+              _id: id,
+              farmerId: farmerObjectId,
+              name: dto.name,
+              category: dto.category,
+              description: dto.description,
+              price: dto.price,
+              quantity: dto.quantity,
+              unit: dto.unit,
+              images: dto.images ?? [],
+              qualityGrade: dto.qualityGrade,
+              qrCode: this.buildTraceUrl(id.toHexString()),
+              initialBlockchainRecordId: listedEvent._id,
+              status: ProductStatus.Active,
+            },
+          ],
+          { session },
+        );
+        return product;
+      });
+      return (await this.toResponses([created]))[0];
+    } finally {
+      await session.endSession();
+    }
   }
 
+  /**
+   * Public marketplace browse. Deactivated (soft-deleted) listings are never
+   * returned here, whatever status filter is requested - farmers still see
+   * their own through findMine.
+   */
   async findAll(query: QueryProductDto): Promise<ProductListResponseDto> {
-    return this.search(query, this.buildFilter(query));
+    const filter = this.buildFilter(query);
+    if (!query.status || query.status === ProductStatus.Inactive) {
+      filter.status = { $ne: ProductStatus.Inactive };
+    }
+    return this.search(query, filter);
   }
 
   async findMine(
@@ -79,7 +179,7 @@ export class MarketplaceService {
   }
 
   async findOne(id: string): Promise<ProductResponseDto> {
-    return this.toResponse(await this.getOwnedOrAny(id));
+    return (await this.toResponses([await this.getOwnedOrAny(id)]))[0];
   }
 
   async update(
@@ -98,7 +198,7 @@ export class MarketplaceService {
     if (dto.qualityGrade !== undefined) product.qualityGrade = dto.qualityGrade;
     if (dto.status !== undefined) product.status = dto.status;
     await product.save();
-    return this.toResponse(product);
+    return (await this.toResponses([product]))[0];
   }
 
   async remove(
@@ -115,7 +215,9 @@ export class MarketplaceService {
 
   async getQr(id: string): Promise<ProductQrResponseDto> {
     const product = await this.getOwnedOrAny(id);
-    const qrCode = product.qrCode ?? this.buildTraceUrl(product.id as string);
+    // Always derive from current config so listings created before the trace
+    // origin was configured still produce a scannable, resolvable QR.
+    const qrCode = this.buildTraceUrl(product.id as string);
     const qrImageDataUri = await QRCode.toDataURL(qrCode, {
       errorCorrectionLevel: 'M',
       margin: 1,
@@ -126,7 +228,25 @@ export class MarketplaceService {
   // --- internals -------------------------------------------------------------
 
   private buildTraceUrl(id: string): string {
-    return `https://farm2fork.com/trace/${id}`;
+    return buildProductTraceUrl(this.config, id);
+  }
+
+  /**
+   * City-level provenance label for the ledger. The chaincode requires a
+   * non-empty location; when the farmer never provided one we record that
+   * honestly rather than inventing a place.
+   */
+  private async farmLocationLabel(farmerId: Types.ObjectId): Promise<string> {
+    const profile = await this.farmerProfileModel
+      .findOne({ userId: farmerId })
+      .select('farmLocation')
+      .lean()
+      .exec();
+    const place = [profile?.farmLocation?.city, profile?.farmLocation?.province]
+      .map((part) => part?.trim())
+      .filter(Boolean)
+      .join(', ');
+    return place || UNKNOWN_LOCATION;
   }
 
   private buildFilter(query: QueryProductDto): FilterQuery<ProductDocument> {
@@ -174,7 +294,7 @@ export class MarketplaceService {
     ]);
 
     return {
-      data: items.map((p) => this.toResponse(p)),
+      data: await this.toResponses(items),
       total,
       page,
       limit,
@@ -206,7 +326,72 @@ export class MarketplaceService {
     return product;
   }
 
-  private toResponse(product: ProductDocument): ProductResponseDto {
+  /**
+   * Maps products to responses, attaching each one's public farm identity
+   * and origin ledger state with two batched lookups per page (no N+1).
+   */
+  private async toResponses(
+    products: ProductDocument[],
+  ): Promise<ProductResponseDto[]> {
+    if (products.length === 0) return [];
+    const farmerIds = [
+      ...new Map(
+        products.map((p) => [p.farmerId.toHexString(), p.farmerId]),
+      ).values(),
+    ];
+    const recordIds = products
+      .map((p) => p.initialBlockchainRecordId)
+      .filter((id): id is Types.ObjectId => Boolean(id));
+
+    const [profiles, records] = await Promise.all([
+      this.farmerProfileModel
+        .find({ userId: { $in: farmerIds } })
+        .select('userId farmName farmLocation.city farmLocation.province')
+        .lean()
+        .exec(),
+      recordIds.length === 0
+        ? Promise.resolve([])
+        : this.blockchainModel
+            .find({ _id: { $in: recordIds } })
+            .select('status')
+            .lean()
+            .exec(),
+    ]);
+
+    const farmers = new Map<string, ProductFarmerSummaryDto>();
+    for (const profile of profiles) {
+      if (!profile.farmName) continue;
+      farmers.set(profile.userId.toHexString(), {
+        farmName: profile.farmName,
+        city: profile.farmLocation?.city || undefined,
+        province: profile.farmLocation?.province || undefined,
+      });
+    }
+    const ledger = new Map<string, OriginLedgerStatus>();
+    for (const record of records) {
+      ledger.set(
+        record._id.toHexString(),
+        record.status === BlockchainTxStatus.Confirmed
+          ? OriginLedgerStatus.Confirmed
+          : record.status === BlockchainTxStatus.Failed
+            ? OriginLedgerStatus.Failed
+            : OriginLedgerStatus.Pending,
+      );
+    }
+
+    return products.map((product) => ({
+      ...this.toResponse(product),
+      farmer: farmers.get(product.farmerId.toHexString()) ?? null,
+      originLedgerStatus: product.initialBlockchainRecordId
+        ? (ledger.get(product.initialBlockchainRecordId.toHexString()) ??
+          OriginLedgerStatus.Pending)
+        : OriginLedgerStatus.Missing,
+    }));
+  }
+
+  private toResponse(
+    product: ProductDocument,
+  ): Omit<ProductResponseDto, 'farmer' | 'originLedgerStatus'> {
     return {
       id: product.id as string,
       farmerId: product.farmerId.toHexString(),

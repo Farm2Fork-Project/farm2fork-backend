@@ -76,6 +76,15 @@ export class AiPrediction {
   @Prop({ type: String, enum: QualityGrade })
   qualityGrade?: QualityGrade;
 
+  /**
+   * Raw grade from the vision model, which grades A-D (D = below any
+   * listable grade). qualityGrade keeps its approved A|B|C enum and is left
+   * empty for a D; this optional field preserves the model's actual output
+   * for evaluation. Additive only - pending project-owner approval (15.1).
+   */
+  @Prop({ type: String, enum: ['A', 'B', 'C', 'D'] })
+  modelGrade?: 'A' | 'B' | 'C' | 'D';
+
   /** 0.0 to 1.0. */
   @Prop({ min: 0, max: 1 })
   confidenceScore?: number;

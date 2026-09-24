@@ -5,12 +5,16 @@ import {
   IsArray,
   IsMongoId,
   IsNotEmpty,
+  IsLatitude,
+  IsLongitude,
   IsNumber,
+  Max,
   IsOptional,
   IsString,
   Min,
   ValidateNested,
 } from 'class-validator';
+import { PAKISTAN_BOUNDS } from '../../../common/geo/geo';
 
 export class OrderAddressDto {
   @ApiProperty({ example: '12 Mall Road' })
@@ -32,6 +36,32 @@ export class OrderAddressDto {
   @IsOptional()
   @IsString()
   zip?: string;
+
+  @ApiProperty({
+    example: 31.5204,
+    description: 'Drop-off pin latitude (inside Pakistan)',
+  })
+  @IsLatitude()
+  @Min(PAKISTAN_BOUNDS.minLat, {
+    message: 'Drop-off pin must be inside Pakistan',
+  })
+  @Max(PAKISTAN_BOUNDS.maxLat, {
+    message: 'Drop-off pin must be inside Pakistan',
+  })
+  lat!: number;
+
+  @ApiProperty({
+    example: 74.3587,
+    description: 'Drop-off pin longitude (inside Pakistan)',
+  })
+  @IsLongitude()
+  @Min(PAKISTAN_BOUNDS.minLng, {
+    message: 'Drop-off pin must be inside Pakistan',
+  })
+  @Max(PAKISTAN_BOUNDS.maxLng, {
+    message: 'Drop-off pin must be inside Pakistan',
+  })
+  lng!: number;
 }
 
 export class CreateOrderItemDto {

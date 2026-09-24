@@ -18,6 +18,8 @@ import {
 } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ApiErrorResponses } from '../../common/decorators/api-error-responses.decorator';
+import { Public } from '../../common/decorators/public.decorator';
+import { QrRenderRateLimit } from '../../common/rate-limit/rate-limits';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
 import type { RequestUser } from '../../common/guards/roles.guard';
@@ -31,21 +33,14 @@ import {
   UpdateProductDto,
 } from './dto';
 
-const VIEWER_ROLES = [
-  UserRole.Farmer,
-  UserRole.Buyer,
-  UserRole.Transporter,
-  UserRole.Admin,
-];
-
 @ApiTags('Marketplace')
-@ApiBearerAuth('JWT-auth')
 @Controller('products')
 export class MarketplaceController {
   constructor(private readonly marketplaceService: MarketplaceService) {}
 
   @Post()
   @Roles(UserRole.Farmer)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Create a product listing (US-04)',
     description: 'Farmer only. Generates a traceability QR code on creation.',
@@ -60,20 +55,21 @@ export class MarketplaceController {
   }
 
   @Get()
-  @Roles(...VIEWER_ROLES)
+  @Public()
   @ApiOperation({
     summary: 'Browse / search / filter product listings (US-05)',
     description:
-      'Authenticated farmer, buyer, transporter or admin. Supports text search, category/unit/grade/status filters, price range, sorting and pagination.',
+      'Public, so guests can browse before signing in. Deactivated listings are never returned here (farmers see their own via /products/mine). Supports text search, category/unit/grade/status filters, price range, sorting and pagination.',
   })
   @ApiOkResponse({ type: ProductListResponseDto })
-  @ApiErrorResponses(400, 401, 403)
+  @ApiErrorResponses(400)
   findAll(@Query() query: QueryProductDto): Promise<ProductListResponseDto> {
     return this.marketplaceService.findAll(query);
   }
 
   @Get('mine')
   @Roles(UserRole.Farmer)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: "List the authenticated farmer's own listings",
     description: 'Farmer only.',
@@ -88,30 +84,36 @@ export class MarketplaceController {
   }
 
   @Get(':id')
-  @Roles(...VIEWER_ROLES)
-  @ApiOperation({ summary: 'Get a single product by id' })
+  @Public()
+  @ApiOperation({
+    summary: 'Get a single product by id',
+    description:
+      'Public. Deactivated listings stay readable by id so order history and QR traces keep resolving.',
+  })
   @ApiParam({ name: 'id', description: 'Product id' })
   @ApiOkResponse({ type: ProductResponseDto })
-  @ApiErrorResponses(401, 403, 404)
+  @ApiErrorResponses(404)
   findOne(@Param('id') id: string): Promise<ProductResponseDto> {
     return this.marketplaceService.findOne(id);
   }
 
   @Get(':id/qr')
-  @Roles(...VIEWER_ROLES)
+  @Public()
+  @QrRenderRateLimit()
   @ApiOperation({
     summary: "Get a product's traceability QR code",
     description: 'Returns the trace URL and a rendered QR image data URI.',
   })
   @ApiParam({ name: 'id', description: 'Product id' })
   @ApiOkResponse({ type: ProductQrResponseDto })
-  @ApiErrorResponses(401, 403, 404)
+  @ApiErrorResponses(404)
   getQr(@Param('id') id: string): Promise<ProductQrResponseDto> {
     return this.marketplaceService.getQr(id);
   }
 
   @Patch(':id')
   @Roles(UserRole.Farmer)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Update a product listing',
     description: 'Farmer only. The caller must own the listing.',
@@ -129,6 +131,7 @@ export class MarketplaceController {
 
   @Delete(':id')
   @Roles(UserRole.Farmer)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Delete (or deactivate) a product listing',
     description: 'Farmer only. The caller must own the listing.',

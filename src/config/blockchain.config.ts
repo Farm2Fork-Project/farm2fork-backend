@@ -2,6 +2,8 @@ import { registerAs } from '@nestjs/config';
 
 export interface IBlockchainConfig {
   enabled: boolean;
+  /** Read-only ledger access for trace verification, without the worker. */
+  readEnabled: boolean;
   pollIntervalMs: number;
   leaseDurationMs: number;
   retryBaseDelayMs: number;
@@ -19,6 +21,7 @@ export const blockchainConfig = registerAs(
   'blockchain',
   (): IBlockchainConfig => ({
     enabled: process.env.BLOCKCHAIN_WORKER_ENABLED === 'true',
+    readEnabled: process.env.FABRIC_READ_ENABLED === 'true',
     pollIntervalMs: Number(process.env.BLOCKCHAIN_POLL_INTERVAL_MS ?? 5_000),
     leaseDurationMs: Number(process.env.BLOCKCHAIN_LEASE_DURATION_MS ?? 30_000),
     retryBaseDelayMs: Number(
@@ -27,7 +30,8 @@ export const blockchainConfig = registerAs(
     channelName: process.env.FABRIC_CHANNEL_NAME ?? 'farm2forkchannel',
     chaincodeName: process.env.FABRIC_CHAINCODE_NAME ?? 'farm2fork-chaincode',
     mspId: process.env.FABRIC_MSP_ID ?? 'Farm2ForkMSP',
-    peerEndpoint: process.env.FABRIC_PEER_ENDPOINT ?? 'peer0.farm2fork.com:7051',
+    peerEndpoint:
+      process.env.FABRIC_PEER_ENDPOINT ?? 'peer0.farm2fork.com:7051',
     peerHostAlias: process.env.FABRIC_PEER_HOST_ALIAS ?? 'peer0.farm2fork.com',
     tlsRootCertPath: process.env.FABRIC_TLS_ROOT_CERT_PATH,
     identityCertPath: process.env.FABRIC_IDENTITY_CERT_PATH,

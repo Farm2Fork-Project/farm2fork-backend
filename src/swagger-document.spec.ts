@@ -11,6 +11,8 @@ import { OrderController } from './modules/order/order.controller';
 import { OrderService } from './modules/order/order.service';
 import { PaymentController } from './modules/payment/payment.controller';
 import { PaymentService } from './modules/payment/payment.service';
+import { TraceabilityController } from './modules/traceability/traceability.controller';
+import { TraceabilityService } from './modules/traceability/traceability.service';
 import { TransportController } from './modules/transport/transport.controller';
 import { TransportService } from './modules/transport/transport.service';
 import { createSwaggerDocument } from './swagger-document';
@@ -29,6 +31,7 @@ describe('createSwaggerDocument', () => {
         OrderController,
         PaymentController,
         TransportController,
+        TraceabilityController,
       ],
       providers: [
         { provide: AppService, useValue: {} },
@@ -38,6 +41,7 @@ describe('createSwaggerDocument', () => {
         { provide: OrderService, useValue: {} },
         { provide: PaymentService, useValue: {} },
         { provide: TransportService, useValue: {} },
+        { provide: TraceabilityService, useValue: {} },
       ],
     }).compile();
 
@@ -61,6 +65,7 @@ describe('createSwaggerDocument', () => {
         'Orders',
         'Payments',
         'Shipments',
+        'Traceability',
       ]),
     );
     expect(
@@ -94,6 +99,11 @@ describe('createSwaggerDocument', () => {
       '201',
     );
     expectPublic(document, '/api/auth/web/logout', 'post', '200');
+    // Guests browse the marketplace and anyone can resolve a product QR.
+    expectPublic(document, '/api/products', 'get', '200');
+    expectPublic(document, '/api/products/{id}', 'get', '200');
+    expectPublic(document, '/api/products/{id}/qr', 'get', '200');
+    expectPublic(document, '/api/trace/products/{id}', 'get', '200');
     expect(document.paths['/api/auth/register/farmer']).toBeUndefined();
     expect(document.paths['/api/auth/register/buyer']).toBeUndefined();
     expect(document.paths['/api/auth/register/transporter']).toBeUndefined();
@@ -112,10 +122,7 @@ describe('createSwaggerDocument', () => {
     const protectedRoutes: Array<[string, HttpMethod, string]> = [
       ['/api/auth/me', 'get', '200'],
       ['/api/products', 'post', '201'],
-      ['/api/products', 'get', '200'],
       ['/api/products/mine', 'get', '200'],
-      ['/api/products/{id}', 'get', '200'],
-      ['/api/products/{id}/qr', 'get', '200'],
       ['/api/products/{id}', 'patch', '200'],
       ['/api/products/{id}', 'delete', '200'],
       ['/api/orders', 'post', '201'],
@@ -140,6 +147,7 @@ describe('createSwaggerDocument', () => {
 
     expectError(document, '/api/products/{id}', 'get', '404');
     expectError(document, '/api/products/{id}', 'delete', '404');
+    expectError(document, '/api/trace/products/{id}', 'get', '404');
     expectError(document, '/api/orders', 'post', '400');
     expectError(document, '/api/orders/{id}', 'get', '404');
     expectError(document, '/api/payments', 'post', '400');

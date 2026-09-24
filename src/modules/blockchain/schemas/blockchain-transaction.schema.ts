@@ -162,3 +162,9 @@ export class BlockchainTransaction {
 export const BlockchainTransactionSchema = SchemaFactory.createForClass(
   BlockchainTransaction,
 );
+
+// Public provenance reads (TraceabilityService) look events up by product.
+BlockchainTransactionSchema.index({
+  'payload.supplyChain.productId': 1,
+  createdAt: 1,
+});

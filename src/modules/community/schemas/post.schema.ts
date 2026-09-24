@@ -51,3 +51,7 @@ export class Post {
 }
 
 export const PostSchema = SchemaFactory.createForClass(Post);
+
+// Feed (newest first) and tag filtering.
+PostSchema.index({ status: 1, createdAt: -1 });
+PostSchema.index({ tags: 1, status: 1, createdAt: -1 });

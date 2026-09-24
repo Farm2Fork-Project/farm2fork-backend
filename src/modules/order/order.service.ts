@@ -14,10 +14,19 @@ import {
   ProductDocument,
   ProductStatus,
 } from '../marketplace/schemas/product.schema';
+import { hasCoordinates, toGeoPoint } from '../../common/geo/geo';
+import {
+  FarmerProfile,
+  FarmerProfileDocument,
+} from '../auth/schemas/farmer-profile.schema';
+import { NotificationService } from '../notification/notification.service';
+import { NotificationType } from '../notification/schemas/notification.schema';
+import { quoteDelivery } from './delivery-pricing';
 import { Order, OrderDocument, OrderStatus } from './schemas/order.schema';
 import {
   CreateOrderDto,
   OrderListResponseDto,
+  OrderQuoteResponseDto,
   OrderResponseDto,
   QueryOrderDto,
 } from './dto';
@@ -32,6 +41,8 @@ import {
  *    product, never trusted from the client.
  *  - Percentage platform fee (§6.2): read via SystemConfigService and snapshot
  *    onto the order so later config changes don't affect existing orders.
+ *  - Fixed delivery fee: priced from the farm pin to the buyer's drop-off pin
+ *    and frozen on the order; grandTotal includes it.
  */
 @Injectable()
 export class OrderService {
@@ -40,13 +51,72 @@ export class OrderService {
     private readonly orderModel: Model<OrderDocument>,
     @InjectModel(Product.name)
     private readonly productModel: Model<ProductDocument>,
+    @InjectModel(FarmerProfile.name)
+    private readonly farmerProfileModel: Model<FarmerProfileDocument>,
     private readonly systemConfig: SystemConfigService,
+    private readonly notifications: NotificationService,
   ) {}
+
+  /** Prices a cart for one farmer without saving anything. */
+  async quote(dto: CreateOrderDto): Promise<OrderQuoteResponseDto> {
+    const priced = await this.price(dto);
+    return {
+      totalAmount: priced.totalAmount,
+      platformFeePercent: priced.platformFeePercent,
+      platformFeeAmount: priced.platformFeeAmount,
+      deliveryFee: priced.delivery.fee,
+      deliveryDistanceKm: priced.delivery.distanceKm,
+      grandTotal: priced.grandTotal,
+    };
+  }
 
   async create(
     buyerId: string,
     dto: CreateOrderDto,
   ): Promise<OrderResponseDto> {
+    const priced = await this.price(dto);
+    const created = await this.orderModel.create({
+      buyerId: new Types.ObjectId(buyerId),
+      farmerId: priced.farmerId,
+      items: priced.items,
+      totalAmount: priced.totalAmount,
+      platformFeePercent: priced.platformFeePercent,
+      platformFeeAmount: priced.platformFeeAmount,
+      deliveryFee: priced.delivery.fee,
+      deliveryDistanceKm: priced.delivery.distanceKm,
+      grandTotal: priced.grandTotal,
+      shippingAddress: dto.shippingAddress,
+      pickupLocation: toGeoPoint(priced.pickup),
+      status: OrderStatus.Pending,
+    });
+
+    const orderLabel = `#${created._id.toHexString().slice(-6).toUpperCase()}`;
+    this.notifications.notifyInBackground({
+      userIds: [priced.farmerId],
+      type: NotificationType.OrderPlaced,
+      title: 'New order received',
+      message: `Order ${orderLabel}: ${priced.items.length} item(s), Rs ${priced.totalAmount.toLocaleString('en-PK')}. It will be dispatched once the buyer pays.`,
+      relatedEntityId: created._id,
+      relatedEntityModel: 'Order',
+    });
+    this.notifications.notifyInBackground({
+      userIds: [buyerId],
+      type: NotificationType.OrderPlaced,
+      title: 'Order placed',
+      message: `Order ${orderLabel} is waiting for payment. Total Rs ${priced.grandTotal.toLocaleString('en-PK')} incl. Rs ${priced.delivery.fee.toLocaleString('en-PK')} delivery.`,
+      relatedEntityId: created._id,
+      relatedEntityModel: 'Order',
+    });
+
+    return this.toResponse(created);
+  }
+
+  /**
+   * Validates the cart against live products (One-Order-One-Farmer, stock,
+   * price snapshots) and computes every amount. Shared by quote and create
+   * so the buyer is charged exactly what they were shown.
+   */
+  private async price(dto: CreateOrderDto) {
     if (dto.items.length === 0) {
       throw new BadRequestException('An order must contain at least one item');
     }
@@ -99,24 +169,41 @@ export class OrderService {
     }
     const farmerId = items[0].farmerId;
 
-    const totalAmount = items.reduce((sum, i) => sum + i.subtotal, 0);
-    const platformFeePercent = await this.systemConfig.getPlatformFeePercent();
-    const platformFeeAmount = (totalAmount * platformFeePercent) / 100;
-    const grandTotal = totalAmount + platformFeeAmount;
+    const farm = await this.farmerProfileModel
+      .findOne({ userId: farmerId })
+      .select('farmLocation')
+      .lean()
+      .exec();
+    if (!hasCoordinates(farm?.farmLocation)) {
+      throw new BadRequestException(
+        "This farm hasn't set its pickup location yet, so delivery can't be priced. Please try again later.",
+      );
+    }
+    const pickup = { lat: farm.farmLocation.lat, lng: farm.farmLocation.lng };
 
-    const created = await this.orderModel.create({
-      buyerId: new Types.ObjectId(buyerId),
+    const totalAmount = items.reduce((sum, i) => sum + i.subtotal, 0);
+    const [platformFeePercent, deliverySettings] = await Promise.all([
+      this.systemConfig.getPlatformFeePercent(),
+      this.systemConfig.getDeliverySettings(),
+    ]);
+    const platformFeeAmount = (totalAmount * platformFeePercent) / 100;
+    const delivery = quoteDelivery(
+      pickup,
+      { lat: dto.shippingAddress.lat, lng: dto.shippingAddress.lng },
+      deliverySettings,
+    );
+    const grandTotal = totalAmount + platformFeeAmount + delivery.fee;
+
+    return {
       farmerId,
       items,
+      pickup,
       totalAmount,
       platformFeePercent,
       platformFeeAmount,
+      delivery,
       grandTotal,
-      shippingAddress: dto.shippingAddress,
-      status: OrderStatus.Pending,
-    });
-
-    return this.toResponse(created);
+    };
   }
 
   async findAll(
@@ -239,12 +326,16 @@ export class OrderService {
       totalAmount: order.totalAmount,
       platformFeePercent: order.platformFeePercent,
       platformFeeAmount: order.platformFeeAmount,
+      deliveryFee: order.deliveryFee ?? 0,
+      deliveryDistanceKm: order.deliveryDistanceKm,
       grandTotal: order.grandTotal,
       shippingAddress: {
         street: order.shippingAddress.street ?? '',
         city: order.shippingAddress.city ?? '',
         province: order.shippingAddress.province ?? '',
         zip: order.shippingAddress.zip,
+        lat: order.shippingAddress.lat,
+        lng: order.shippingAddress.lng,
       },
       status: order.status,
       paymentId: order.paymentId?.toHexString(),
