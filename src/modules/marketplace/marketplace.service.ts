@@ -31,6 +31,10 @@ import {
   ProductStatus,
 } from './schemas/product.schema';
 import {
+  OriginLedgerStatus,
+  ProductFarmerSummaryDto,
+} from './dto/product-response.dto';
+import {
   CreateProductDto,
   ProductListResponseDto,
   ProductQrResponseDto,
@@ -146,7 +150,7 @@ export class MarketplaceService {
         );
         return product;
       });
-      return this.toResponse(created);
+      return (await this.toResponses([created]))[0];
     } finally {
       await session.endSession();
     }
@@ -175,7 +179,7 @@ export class MarketplaceService {
   }
 
   async findOne(id: string): Promise<ProductResponseDto> {
-    return this.toResponse(await this.getOwnedOrAny(id));
+    return (await this.toResponses([await this.getOwnedOrAny(id)]))[0];
   }
 
   async update(
@@ -194,7 +198,7 @@ export class MarketplaceService {
     if (dto.qualityGrade !== undefined) product.qualityGrade = dto.qualityGrade;
     if (dto.status !== undefined) product.status = dto.status;
     await product.save();
-    return this.toResponse(product);
+    return (await this.toResponses([product]))[0];
   }
 
   async remove(
@@ -290,7 +294,7 @@ export class MarketplaceService {
     ]);
 
     return {
-      data: items.map((p) => this.toResponse(p)),
+      data: await this.toResponses(items),
       total,
       page,
       limit,
@@ -322,7 +326,72 @@ export class MarketplaceService {
     return product;
   }
 
-  private toResponse(product: ProductDocument): ProductResponseDto {
+  /**
+   * Maps products to responses, attaching each one's public farm identity
+   * and origin ledger state with two batched lookups per page (no N+1).
+   */
+  private async toResponses(
+    products: ProductDocument[],
+  ): Promise<ProductResponseDto[]> {
+    if (products.length === 0) return [];
+    const farmerIds = [
+      ...new Map(
+        products.map((p) => [p.farmerId.toHexString(), p.farmerId]),
+      ).values(),
+    ];
+    const recordIds = products
+      .map((p) => p.initialBlockchainRecordId)
+      .filter((id): id is Types.ObjectId => Boolean(id));
+
+    const [profiles, records] = await Promise.all([
+      this.farmerProfileModel
+        .find({ userId: { $in: farmerIds } })
+        .select('userId farmName farmLocation.city farmLocation.province')
+        .lean()
+        .exec(),
+      recordIds.length === 0
+        ? Promise.resolve([])
+        : this.blockchainModel
+            .find({ _id: { $in: recordIds } })
+            .select('status')
+            .lean()
+            .exec(),
+    ]);
+
+    const farmers = new Map<string, ProductFarmerSummaryDto>();
+    for (const profile of profiles) {
+      if (!profile.farmName) continue;
+      farmers.set(profile.userId.toHexString(), {
+        farmName: profile.farmName,
+        city: profile.farmLocation?.city || undefined,
+        province: profile.farmLocation?.province || undefined,
+      });
+    }
+    const ledger = new Map<string, OriginLedgerStatus>();
+    for (const record of records) {
+      ledger.set(
+        record._id.toHexString(),
+        record.status === BlockchainTxStatus.Confirmed
+          ? OriginLedgerStatus.Confirmed
+          : record.status === BlockchainTxStatus.Failed
+            ? OriginLedgerStatus.Failed
+            : OriginLedgerStatus.Pending,
+      );
+    }
+
+    return products.map((product) => ({
+      ...this.toResponse(product),
+      farmer: farmers.get(product.farmerId.toHexString()) ?? null,
+      originLedgerStatus: product.initialBlockchainRecordId
+        ? (ledger.get(product.initialBlockchainRecordId.toHexString()) ??
+          OriginLedgerStatus.Pending)
+        : OriginLedgerStatus.Missing,
+    }));
+  }
+
+  private toResponse(
+    product: ProductDocument,
+  ): Omit<ProductResponseDto, 'farmer' | 'originLedgerStatus'> {
     return {
       id: product.id as string,
       farmerId: product.farmerId.toHexString(),

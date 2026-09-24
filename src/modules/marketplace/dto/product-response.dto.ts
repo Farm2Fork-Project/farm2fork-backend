@@ -5,6 +5,29 @@ import {
   QualityGrade,
 } from '../schemas/product.schema';
 
+/** Public farm identity shown on listings (never personal or KYC data). */
+export class ProductFarmerSummaryDto {
+  @ApiProperty({ example: 'Green Valley Farm' })
+  farmName!: string;
+
+  @ApiPropertyOptional({ example: 'Multan' })
+  city?: string;
+
+  @ApiPropertyOptional({ example: 'Punjab' })
+  province?: string;
+}
+
+/**
+ * Ledger state of the listing's first provenance record (`listed`).
+ * `missing` = created before ledger recording existed.
+ */
+export enum OriginLedgerStatus {
+  Pending = 'pending',
+  Confirmed = 'confirmed',
+  Failed = 'failed',
+  Missing = 'missing',
+}
+
 export class ProductResponseDto {
   @ApiProperty({ example: '6a2fe77bb77795516febc287' })
   id!: string;
@@ -62,4 +85,17 @@ export class ProductResponseDto {
 
   @ApiProperty({ example: '2026-06-15T11:52:27.282Z' })
   updatedAt!: string;
+
+  @ApiProperty({
+    type: ProductFarmerSummaryDto,
+    nullable: true,
+    description: 'Farm identity, or null when the farmer has no profile.',
+  })
+  farmer!: ProductFarmerSummaryDto | null;
+
+  @ApiProperty({
+    enum: OriginLedgerStatus,
+    example: OriginLedgerStatus.Confirmed,
+  })
+  originLedgerStatus!: OriginLedgerStatus;
 }
