@@ -7,6 +7,7 @@ import {
 } from '@nestjs/swagger';
 import { ApiErrorResponses } from '../../common/decorators/api-error-responses.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { PublicTraceRateLimit } from '../../common/rate-limit/rate-limits';
 import { ProductTraceResponseDto } from './dto/product-trace-response.dto';
 import { TraceabilityService } from './traceability.service';
 
@@ -17,6 +18,7 @@ export class TraceabilityController {
 
   @Get('products/:id')
   @Public()
+  @PublicTraceRateLimit()
   @ApiOperation({
     summary: 'Public provenance journey for a product (US-08)',
     description:
@@ -24,7 +26,7 @@ export class TraceabilityController {
   })
   @ApiParam({ name: 'id', description: 'Product id' })
   @ApiOkResponse({ type: ProductTraceResponseDto })
-  @ApiErrorResponses(404)
+  @ApiErrorResponses(404, 429)
   traceProduct(@Param('id') id: string): Promise<ProductTraceResponseDto> {
     return this.traceabilityService.traceProduct(id);
   }
