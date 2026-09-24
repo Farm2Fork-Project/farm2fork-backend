@@ -45,6 +45,10 @@ export function createSwaggerDocument(
       'Shipments',
       'Shipment discovery, claims, tracking and delivery updates',
     )
+    .addTag(
+      'Traceability',
+      'Public product provenance backed by the Hyperledger Fabric ledger',
+    )
     .build();
 
   return SwaggerModule.createDocument(app, config);

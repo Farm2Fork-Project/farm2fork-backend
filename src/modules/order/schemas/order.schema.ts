@@ -132,3 +132,5 @@ export const OrderSchema = SchemaFactory.createForClass(Order);
 // Critical indexes (master context 5.18).
 OrderSchema.index({ buyerId: 1, status: 1 });
 OrderSchema.index({ farmerId: 1, status: 1 });
+// Public provenance reads find the paid orders that contain a product.
+OrderSchema.index({ 'items.productId': 1 });

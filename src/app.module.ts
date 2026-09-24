@@ -24,6 +24,7 @@ import { MarketplaceModule } from './modules/marketplace/marketplace.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { OrderModule } from './modules/order/order.module';
 import { PaymentModule } from './modules/payment/payment.module';
+import { TraceabilityModule } from './modules/traceability/traceability.module';
 import { TransportModule } from './modules/transport/transport.module';
 
 const shouldLoadInfrastructure = process.env.NODE_ENV !== 'test';
@@ -37,6 +38,7 @@ const featureModules = [
   PaymentModule,
   BlockchainModule,
   TransportModule,
+  TraceabilityModule,
   LoanModule,
   AdminModule,
   CommunityModule,
@@ -118,6 +120,8 @@ const featureModules = [
         FINANCIAL_PARTNER_EMAIL_ALLOWLIST: Joi.string().optional(),
         // Firebase web session (HTTP-only cookie) + CSRF/origin protection.
         WEB_APP_ORIGIN: Joi.string().optional(),
+        // Public origin encoded in product QR codes (defaults to WEB_APP_ORIGIN).
+        PUBLIC_TRACE_ORIGIN: Joi.string().uri().optional(),
         WEB_SESSION_TTL_SECONDS: Joi.number().integer().min(300).default(86_400),
         WEB_SESSION_COOKIE_NAME: Joi.string().default('f2f_session'),
         WEB_SESSION_COOKIE_SECURE: Joi.boolean().default(true),

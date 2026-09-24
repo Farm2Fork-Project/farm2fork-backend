@@ -165,7 +165,8 @@ export class FabricGatewayService
     const supplyChain = record.payload.supplyChain;
     if (
       record.type !== BlockchainTxType.SupplyChainEvent ||
-      record.referenceModel !== BlockchainReferenceModel.Shipment ||
+      (record.referenceModel !== BlockchainReferenceModel.Shipment &&
+        record.referenceModel !== BlockchainReferenceModel.Product) ||
       !supplyChain?.productId ||
       !supplyChain.farmerId ||
       !supplyChain.eventType ||
