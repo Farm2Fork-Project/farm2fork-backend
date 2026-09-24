@@ -96,13 +96,27 @@ export class LoanService {
     if (user.role !== UserRole.Farmer) {
       throw new ForbiddenException('Only farmers can apply for loans');
     }
+    const safeFiles: UploadedDocument[] =
+      files == null ? [] : Array.isArray(files) ? files : (() => {
+        throw new BadRequestException('Invalid documents payload');
+      })();
+    if (
+      !safeFiles.every(
+        (file) =>
+          file &&
+          Buffer.isBuffer(file.buffer) &&
+          typeof file.size === 'number',
+      )
+    ) {
+      throw new BadRequestException('Invalid document format');
+    }
     const { min, max } = await this.systemConfig.getLoanLimits();
     if (dto.amount < min || dto.amount > max) {
       throw new BadRequestException(
         `Loan amount must be between Rs ${min.toLocaleString('en-PK')} and Rs ${max.toLocaleString('en-PK')}`,
       );
     }
-    if (files.length > MAX_LOAN_DOCUMENTS) {
+    if (safeFiles.length > MAX_LOAN_DOCUMENTS) {
       throw new BadRequestException(
         `Attach at most ${MAX_LOAN_DOCUMENTS} documents`,
       );
@@ -117,9 +131,9 @@ export class LoanService {
       );
     }
     // Validate every file before uploading any of them.
-    files.forEach((file) => this.storage.validate(file.buffer, 'document'));
+    safeFiles.forEach((file) => this.storage.validate(file.buffer, 'document'));
     const documents: string[] = [];
-    for (const file of files) {
+    for (const file of safeFiles) {
       documents.push(
         await this.storage.uploadPrivateDocument(file.buffer, 'loan-documents'),
       );
