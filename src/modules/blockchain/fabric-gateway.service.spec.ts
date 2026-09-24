@@ -109,6 +109,50 @@ describe('FabricGatewayService', () => {
     );
   });
 
+  it('maps a product listed event to immutable ledger arguments', async () => {
+    const timestamp = new Date('2026-08-11T11:00:00.000Z');
+    const record = shipmentRecord({ timestamp });
+    const farmerId = new Types.ObjectId();
+    record.referenceModel = BlockchainReferenceModel.Product;
+    record.referenceId = record.payload.supplyChain!.productId!;
+    record.payload.supplyChain = {
+      ...record.payload.supplyChain!,
+      farmerId,
+      actorId: farmerId,
+      actorRole: 'farmer',
+      eventType: 'listed',
+      location: 'Multan, Punjab',
+    };
+    contract.submitAsync.mockResolvedValue({
+      getStatus: jest.fn().mockResolvedValue({
+        successful: true,
+        transactionId: 'fabric-listed-001',
+        blockNumber: 7n,
+      }),
+    });
+
+    await service.submit(record);
+
+    expect(contract.submitAsync).toHaveBeenCalledWith(
+      'RecordSupplyChainEvent',
+      {
+        arguments: [
+          record._id.toHexString(),
+          record.referenceId.toHexString(),
+          'Product',
+          record.referenceId.toHexString(),
+          farmerId.toHexString(),
+          'listed',
+          'Multan, Punjab',
+          farmerId.toHexString(),
+          'farmer',
+          timestamp.toISOString(),
+        ],
+        endorsingOrganizations: ['Farm2ForkMSP'],
+      },
+    );
+  });
+
   it('rejects incomplete payloads before calling Fabric', async () => {
     const record = paymentRecord();
     record.payload.payment = null;
