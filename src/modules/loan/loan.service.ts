@@ -162,9 +162,15 @@ export class LoanService {
   async findAll(query: QueryLoansDto): Promise<LoanPageDto> {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
-    let statusFilter: LoanStatus | undefined;
+
+    let filter: FilterQuery<LoanApplicationDocument> = {};
     if (query.status !== undefined) {
-      if (
+      if (typeof query.status !== 'string') {
+        throw new BadRequestException('Invalid loan status filter.');
+      }
+      filter = { status: { $eq: query.status } };
+    }
+
         typeof query.status !== 'string' ||
         !Object.values(LoanStatus).includes(query.status as LoanStatus)
       ) {
