@@ -5,6 +5,10 @@ import type { JwtSignOptions } from '@nestjs/jwt';
 import { MongooseModule } from '@nestjs/mongoose';
 import { PassportModule } from '@nestjs/passport';
 import { AuthController } from './auth.controller';
+import {
+  FarmerProfileController,
+  FarmerProfileService,
+} from './farmer-profile.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { FirebaseSessionAuthGuard } from '../../common/guards/firebase-session-auth.guard';
@@ -51,8 +55,13 @@ import { User, UserSchema } from './schemas/user.schema';
       },
     ]),
   ],
-  controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, FirebaseSessionAuthGuard],
+  controllers: [AuthController, FarmerProfileController],
+  providers: [
+    AuthService,
+    JwtStrategy,
+    FirebaseSessionAuthGuard,
+    FarmerProfileService,
+  ],
   exports: [AuthService, FirebaseSessionAuthGuard, MongooseModule],
 })
 export class AuthModule {}

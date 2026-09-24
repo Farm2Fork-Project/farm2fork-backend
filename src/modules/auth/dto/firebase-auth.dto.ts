@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsDefined,
   IsEnum,
   IsNotEmpty,
   IsNumber,
@@ -19,7 +20,7 @@ import {
   BankAccountDetailsDto,
   BuyerAddressDto,
   CNIC_REGEX,
-  GeoPointDto,
+  FarmLocationDto,
 } from './register.dto';
 
 /**
@@ -60,11 +61,16 @@ export class FirebaseOnboardFarmerDto extends FirebaseOnboardDto {
   @Matches(CNIC_REGEX, { message: 'cnic must be a valid Pakistani CNIC' })
   cnic!: string;
 
-  @ApiPropertyOptional({ type: GeoPointDto })
-  @IsOptional()
+  @ApiProperty({
+    type: FarmLocationDto,
+    description:
+      'Required: transporters can only pick up from farms with a complete location.',
+  })
+  // IsDefined: ValidateNested alone lets a missing object through.
+  @IsDefined()
   @ValidateNested()
-  @Type(() => GeoPointDto)
-  farmLocation?: GeoPointDto;
+  @Type(() => FarmLocationDto)
+  farmLocation!: FarmLocationDto;
 
   @ApiPropertyOptional({ type: [String], example: ['wheat', 'tomatoes'] })
   @IsOptional()
