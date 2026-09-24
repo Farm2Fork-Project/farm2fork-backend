@@ -43,6 +43,14 @@ import {
 } from '../src/modules/transport/schemas/shipment.schema';
 import { TraceabilityService } from '../src/modules/traceability/traceability.service';
 import { TransportService } from '../src/modules/transport/transport.service';
+import { SystemConfigService } from '../src/modules/admin/services/system-config.service';
+import {
+  TransporterProfile,
+  TransporterProfileDocument,
+  TransporterProfileSchema,
+  VehicleType,
+} from '../src/modules/auth/schemas/transporter-profile.schema';
+import { NotificationService } from '../src/modules/notification/notification.service';
 
 describe('Product provenance: listing -> payment -> shipment -> public trace', () => {
   let replSet: MongoMemoryReplSet;
@@ -66,6 +74,7 @@ describe('Product provenance: listing -> payment -> shipment -> public trace', (
           { name: Product.name, schema: ProductSchema },
           { name: Order.name, schema: OrderSchema },
           { name: FarmerProfile.name, schema: FarmerProfileSchema },
+          { name: TransporterProfile.name, schema: TransporterProfileSchema },
           { name: Shipment.name, schema: ShipmentSchema },
           {
             name: BlockchainTransaction.name,
@@ -77,6 +86,17 @@ describe('Product provenance: listing -> payment -> shipment -> public trace', (
         MarketplaceService,
         TransportService,
         TraceabilityService,
+        {
+          provide: SystemConfigService,
+          useValue: {
+            getDeliverySettings: () =>
+              Promise.resolve(SystemConfigService.defaultDeliverySettings),
+          },
+        },
+        {
+          provide: NotificationService,
+          useValue: { notify: jest.fn(), notifyInBackground: jest.fn() },
+        },
         {
           provide: FABRIC_GATEWAY_CLIENT,
           useValue: { isAvailable: () => false, findByLedgerKey: jest.fn() },
@@ -223,7 +243,20 @@ describe('Product provenance: listing -> payment -> shipment -> public trace', (
     });
 
     // 4. A transporter claims the delivery (real transactional path).
-    await transport.claim(order.id, new Types.ObjectId().toHexString());
+    const transporterId = new Types.ObjectId();
+    await moduleRef
+      .get<Model<TransporterProfileDocument>>(
+        getModelToken(TransporterProfile.name),
+      )
+      .create({
+        userId: transporterId,
+        vehicleType: VehicleType.Van,
+        vehicleNumber: 'MNA-4455',
+        licenseNumber: 'LIC-1',
+        cnic: `CNIC-${transporterId.toHexString()}`,
+        isAvailable: true,
+      });
+    await transport.claim(order.id, transporterId.toHexString());
 
     trace = await traceability.traceProduct(created.id);
     expect(trace.farmer).toEqual({
