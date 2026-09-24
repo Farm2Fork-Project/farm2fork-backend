@@ -27,6 +27,24 @@ export enum TraceLedgerStatus {
   Failed = 'failed',
 }
 
+/**
+ * Result of re-reading a confirmed event from Hyperledger Fabric.
+ * - verified: the ledger holds the record with the same transaction id
+ * - mismatch: the ledger holds the key with a different transaction id
+ * - not_found: the ledger has no record under this key
+ */
+export enum OnChainCheck {
+  Verified = 'verified',
+  Mismatch = 'mismatch',
+  NotFound = 'not_found',
+}
+
+/** Whether this response's confirmed events were re-checked on Fabric. */
+export enum LedgerCheckState {
+  Checked = 'checked',
+  Unavailable = 'unavailable',
+}
+
 export class TraceLedgerDto {
   @ApiProperty({ enum: TraceLedgerStatus })
   status!: TraceLedgerStatus;
@@ -42,6 +60,13 @@ export class TraceLedgerDto {
 
   @ApiPropertyOptional({ example: '2026-08-11T12:05:03.000Z' })
   confirmedAt?: string;
+
+  @ApiPropertyOptional({
+    enum: OnChainCheck,
+    description:
+      'Present only for confirmed events when the Fabric peer was reachable.',
+  })
+  onChain?: OnChainCheck;
 }
 
 export class TraceEventDto {
@@ -119,6 +144,13 @@ export class TraceSummaryDto {
     description: 'True once the listing event itself is confirmed on Fabric.',
   })
   originVerified!: boolean;
+
+  @ApiProperty({
+    enum: LedgerCheckState,
+    description:
+      'checked = confirmed events were re-read from the Fabric peer; unavailable = no peer connection, states come from the backend outbox only.',
+  })
+  ledgerCheck!: LedgerCheckState;
 }
 
 export class ProductTraceResponseDto {

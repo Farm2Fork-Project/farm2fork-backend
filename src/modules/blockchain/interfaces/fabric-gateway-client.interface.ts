@@ -46,6 +46,8 @@ export interface FabricGatewayRuntime {
 }
 
 export interface FabricGatewayClient {
+  /** Whether a Fabric connection is open in this process. */
+  isAvailable(): boolean;
   findByLedgerKey(ledgerKey: string): Promise<FabricLedgerRecord | null>;
   submit(record: BlockchainTransactionDocument): Promise<FabricCommit>;
 }

@@ -43,6 +43,7 @@ describe('BlockchainOutboxWorker integration', () => {
     ),
   } as unknown as ConfigService;
   const gateway: jest.Mocked<FabricGatewayClient> = {
+    isAvailable: jest.fn().mockReturnValue(true),
     findByLedgerKey: jest.fn(),
     submit: jest.fn(),
   };

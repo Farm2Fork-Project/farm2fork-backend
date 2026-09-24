@@ -1,6 +1,7 @@
 import {
   Inject,
   Injectable,
+  Logger,
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
@@ -28,6 +29,7 @@ const decoder = new TextDecoder();
 export class FabricGatewayService
   implements FabricGatewayClient, OnModuleInit, OnModuleDestroy
 {
+  private readonly logger = new Logger(FabricGatewayService.name);
   private contract?: FabricContract;
 
   constructor(
@@ -37,11 +39,30 @@ export class FabricGatewayService
   ) {}
 
   async onModuleInit(): Promise<void> {
-    if (!this.config.get<boolean>('blockchain.enabled', false)) {
+    const workerEnabled = this.config.get<boolean>('blockchain.enabled', false);
+    const readEnabled = this.config.get<boolean>(
+      'blockchain.readEnabled',
+      false,
+    );
+    if (!workerEnabled && !readEnabled) {
       return;
     }
 
-    this.contract = await this.runtime.connect();
+    try {
+      this.contract = await this.runtime.connect();
+    } catch (error) {
+      // The submission worker cannot run without Fabric, so fail fast there.
+      // Read-only verification is best effort: the API keeps serving and
+      // traces report the ledger check as unavailable.
+      if (workerEnabled) throw error;
+      this.logger.warn(
+        `Fabric read-only connection failed; trace verification disabled: ${errorMessage(error)}`,
+      );
+    }
+  }
+
+  isAvailable(): boolean {
+    return this.contract !== undefined;
   }
 
   onModuleDestroy(): void {
@@ -54,7 +75,7 @@ export class FabricGatewayService
         'GetTransactionByLedgerKey',
         ledgerKey,
       );
-      return this.parseLedgerRecord(result);
+      return this.parseLedgerRecord(result, ledgerKey);
     } catch (error) {
       if (isFabricNotFound(error)) {
         return null;
@@ -106,17 +127,48 @@ export class FabricGatewayService
     return this.contract;
   }
 
-  private parseLedgerRecord(result: Uint8Array): FabricLedgerRecord {
+  /**
+   * The chaincode stores the record under the ledger key but does not repeat
+   * the key inside the JSON (see farm2fork-chaincode model.BlockchainTransaction),
+   * so the requested key is attached here. Requiring `ledgerKey` in the body
+   * made every real read-back fail as a validation error.
+   */
+  private parseLedgerRecord(
+    result: Uint8Array,
+    ledgerKey: string,
+  ): FabricLedgerRecord {
     try {
       const record: unknown = JSON.parse(decoder.decode(result));
-      if (
-        !record ||
-        typeof record !== 'object' ||
-        typeof (record as FabricLedgerRecord).ledgerKey !== 'string'
-      ) {
-        throw new Error('Fabric response does not contain a ledger key');
+      if (!record || typeof record !== 'object') {
+        throw new Error('Fabric response is not a ledger record');
       }
-      return record as FabricLedgerRecord;
+      const body = record as Record<string, unknown>;
+      if (
+        typeof body.referenceId !== 'string' ||
+        typeof body.referenceModel !== 'string' ||
+        typeof body.txHash !== 'string' ||
+        body.txHash.length === 0
+      ) {
+        throw new Error('Fabric response is missing required ledger fields');
+      }
+      const supplyChain = body.payload as
+        | { supplyChain?: { productId?: unknown } | null }
+        | undefined;
+      const productId = supplyChain?.supplyChain?.productId;
+      return {
+        ledgerKey,
+        referenceId: body.referenceId,
+        referenceModel: body.referenceModel,
+        txHash: body.txHash,
+        channelName:
+          typeof body.channelName === 'string' ? body.channelName : undefined,
+        // The chaincode cannot know its own block number and stores 0.
+        blockNumber:
+          typeof body.blockNumber === 'number' && body.blockNumber > 0
+            ? body.blockNumber
+            : undefined,
+        productId: typeof productId === 'string' ? productId : undefined,
+      };
     } catch (error) {
       throw new FabricGatewayFailure(
         'permanent',

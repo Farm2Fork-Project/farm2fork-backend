@@ -3,6 +3,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import { Types } from 'mongoose';
 import { FarmerProfile } from '../auth/schemas/farmer-profile.schema';
+import { FABRIC_GATEWAY_CLIENT } from '../blockchain/interfaces/fabric-gateway-client.interface';
 import {
   BlockchainReferenceModel,
   BlockchainTransaction,
@@ -17,6 +18,8 @@ import {
 } from '../marketplace/schemas/product.schema';
 import { Order } from '../order/schemas/order.schema';
 import {
+  LedgerCheckState,
+  OnChainCheck,
   TraceEventType,
   TraceLedgerStatus,
 } from './dto/product-trace-response.dto';
@@ -76,6 +79,7 @@ describe('TraceabilityService', () => {
   let orderModel: { find: jest.Mock };
   let blockchainModel: { find: jest.Mock };
   let farmerProfileModel: { findOne: jest.Mock };
+  let fabric: { isAvailable: jest.Mock; findByLedgerKey: jest.Mock };
 
   beforeEach(async () => {
     productModel = {
@@ -104,9 +108,15 @@ describe('TraceabilityService', () => {
       ),
     };
 
+    fabric = {
+      isAvailable: jest.fn().mockReturnValue(false),
+      findByLedgerKey: jest.fn(),
+    };
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         TraceabilityService,
+        { provide: FABRIC_GATEWAY_CLIENT, useValue: fabric },
         { provide: getModelToken(Product.name), useValue: productModel },
         { provide: getModelToken(Order.name), useValue: orderModel },
         {
@@ -212,7 +222,10 @@ describe('TraceabilityService', () => {
       totalEvents: 3,
       confirmedEvents: 1,
       originVerified: true,
+      ledgerCheck: LedgerCheckState.Unavailable,
     });
+    // Without a peer connection nothing is claimed as re-read from Fabric.
+    expect(trace.events[0].ledger.onChain).toBeUndefined();
   });
 
   it('never leaks payment amounts, buyer ids or actor ids', async () => {
@@ -261,5 +274,89 @@ describe('TraceabilityService', () => {
     expect(trace.summary.originVerified).toBe(false);
     // No paid orders means no payment ledger lookup at all.
     expect(blockchainModel.find).toHaveBeenCalledTimes(1);
+  });
+
+  describe('Fabric read-back', () => {
+    function confirmedListed(txHash: string) {
+      return supplyChainRecord('listed', '2026-08-11T11:00:00.000Z', {
+        status: BlockchainTxStatus.Confirmed,
+        txHash,
+      });
+    }
+
+    beforeEach(() => fabric.isAvailable.mockReturnValue(true));
+
+    it('marks the origin verified only when the ledger holds the same tx', async () => {
+      const listed = confirmedListed('tx-listed');
+      blockchainModel.find.mockReturnValueOnce(query([listed]));
+      fabric.findByLedgerKey.mockResolvedValue({
+        ledgerKey: listed._id.toHexString(),
+        referenceId: PRODUCT_ID.toHexString(),
+        referenceModel: 'Product',
+        txHash: 'tx-listed',
+      });
+
+      const trace = await service.traceProduct(PRODUCT_ID.toHexString());
+
+      expect(fabric.findByLedgerKey).toHaveBeenCalledWith(
+        listed._id.toHexString(),
+      );
+      expect(trace.events[0].ledger.onChain).toBe(OnChainCheck.Verified);
+      expect(trace.summary.ledgerCheck).toBe(LedgerCheckState.Checked);
+      expect(trace.summary.originVerified).toBe(true);
+    });
+
+    it('does not call a mismatched or missing ledger record verified', async () => {
+      blockchainModel.find.mockReturnValueOnce(
+        query([confirmedListed('tx-in-outbox')]),
+      );
+      fabric.findByLedgerKey.mockResolvedValueOnce({
+        ledgerKey: 'k',
+        referenceId: 'r',
+        referenceModel: 'Product',
+        txHash: 'some-other-tx',
+      });
+      const mismatched = await service.traceProduct(PRODUCT_ID.toHexString());
+      expect(mismatched.events[0].ledger.onChain).toBe(OnChainCheck.Mismatch);
+      expect(mismatched.summary.originVerified).toBe(false);
+
+      blockchainModel.find.mockReturnValueOnce(
+        query([confirmedListed('tx-in-outbox')]),
+      );
+      fabric.findByLedgerKey.mockResolvedValueOnce(null);
+      const missing = await service.traceProduct(PRODUCT_ID.toHexString());
+      expect(missing.events[0].ledger.onChain).toBe(OnChainCheck.NotFound);
+      expect(missing.summary.originVerified).toBe(false);
+    });
+
+    it('degrades to unavailable instead of failing when the peer errors', async () => {
+      blockchainModel.find.mockReturnValueOnce(
+        query([confirmedListed('tx-listed')]),
+      );
+      fabric.findByLedgerKey.mockRejectedValue(new Error('14 UNAVAILABLE'));
+
+      const trace = await service.traceProduct(PRODUCT_ID.toHexString());
+
+      expect(trace.summary.ledgerCheck).toBe(LedgerCheckState.Unavailable);
+      expect(trace.events[0].ledger.onChain).toBeUndefined();
+      expect(trace.events[0].ledger.status).toBe(TraceLedgerStatus.Confirmed);
+    });
+
+    it('never re-reads a record it already verified', async () => {
+      const listed = confirmedListed('tx-listed');
+      fabric.findByLedgerKey.mockResolvedValue({
+        ledgerKey: listed._id.toHexString(),
+        referenceId: 'r',
+        referenceModel: 'Product',
+        txHash: 'tx-listed',
+      });
+      blockchainModel.find.mockReturnValueOnce(query([listed]));
+      await service.traceProduct(PRODUCT_ID.toHexString());
+      blockchainModel.find.mockReturnValueOnce(query([listed]));
+      const again = await service.traceProduct(PRODUCT_ID.toHexString());
+
+      expect(fabric.findByLedgerKey).toHaveBeenCalledTimes(1);
+      expect(again.events[0].ledger.onChain).toBe(OnChainCheck.Verified);
+    });
   });
 });

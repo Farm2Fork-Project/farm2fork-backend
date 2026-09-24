@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
@@ -17,6 +17,12 @@ import {
 } from '../marketplace/schemas/product.schema';
 import { Order, OrderDocument } from '../order/schemas/order.schema';
 import {
+  FABRIC_GATEWAY_CLIENT,
+  type FabricGatewayClient,
+} from '../blockchain/interfaces/fabric-gateway-client.interface';
+import {
+  LedgerCheckState,
+  OnChainCheck,
   ProductTraceResponseDto,
   TraceEventDto,
   TraceEventType,
@@ -27,6 +33,10 @@ import {
 /** Upper bounds that keep a public, unauthenticated read cheap. */
 export const MAX_SUPPLY_CHAIN_EVENTS = 200;
 export const MAX_PAYMENT_EVENTS = 100;
+/** Fabric reads per trace request, and how long to wait for each. */
+export const MAX_ON_CHAIN_CHECKS = 50;
+export const ON_CHAIN_CHECK_TIMEOUT_MS = 3_000;
+const VERIFIED_CACHE_LIMIT = 5_000;
 
 const SUPPLY_CHAIN_EVENT_TYPES = new Set<string>([
   TraceEventType.Listed,
@@ -48,7 +58,16 @@ const SUPPLY_CHAIN_EVENT_TYPES = new Set<string>([
  */
 @Injectable()
 export class TraceabilityService {
+  private readonly logger = new Logger(TraceabilityService.name);
+  /**
+   * Ledger records are immutable, so a positive check never needs repeating.
+   * Only `verified` results are cached; mismatches are re-checked each time.
+   */
+  private readonly verifiedKeys = new Set<string>();
+
   constructor(
+    @Inject(FABRIC_GATEWAY_CLIENT)
+    private readonly fabric: FabricGatewayClient,
     @InjectModel(Product.name)
     private readonly productModel: Model<ProductDocument>,
     @InjectModel(Order.name)
@@ -96,6 +115,11 @@ export class TraceabilityService {
         a.occurredAt.localeCompare(b.occurredAt) || a.id.localeCompare(b.id),
     );
 
+    const ledgerCheck = await this.checkOnChain(
+      [...supplyChainRecords, ...paymentRecords],
+      events,
+    );
+
     const listed = events.find((event) => event.type === TraceEventType.Listed);
     return {
       product: {
@@ -115,12 +139,76 @@ export class TraceabilityService {
         confirmedEvents: events.filter(
           (event) => event.ledger.status === TraceLedgerStatus.Confirmed,
         ).length,
-        originVerified: listed?.ledger.status === TraceLedgerStatus.Confirmed,
+        // Verified means confirmed by the worker and, when the peer is
+        // reachable, re-read from Fabric with a matching transaction id.
+        originVerified:
+          listed?.ledger.status === TraceLedgerStatus.Confirmed &&
+          (listed.ledger.onChain === undefined ||
+            listed.ledger.onChain === OnChainCheck.Verified),
+        ledgerCheck,
       },
     };
   }
 
   // --- internals -------------------------------------------------------------
+
+  /**
+   * Re-reads confirmed events from the Fabric peer and annotates each with
+   * whether the ledger really holds that transaction. Best effort: without
+   * a peer connection (local dev without Fabric) the check is reported as
+   * unavailable instead of failing the public trace.
+   */
+  private async checkOnChain(
+    records: BlockchainTransactionDocument[],
+    events: TraceEventDto[],
+  ): Promise<LedgerCheckState> {
+    if (!this.fabric.isAvailable()) return LedgerCheckState.Unavailable;
+
+    const txHashById = new Map(
+      records.map((record) => [record._id.toHexString(), record.txHash]),
+    );
+    const toCheck = events
+      .filter((event) => event.ledger.status === TraceLedgerStatus.Confirmed)
+      .slice(0, MAX_ON_CHAIN_CHECKS);
+
+    try {
+      await Promise.all(
+        toCheck.map(async (event) => {
+          event.ledger.onChain = await this.checkOne(
+            event.id,
+            txHashById.get(event.id),
+          );
+        }),
+      );
+      return LedgerCheckState.Checked;
+    } catch (error) {
+      this.logger.warn(
+        `Fabric read-back unavailable for trace: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      for (const event of toCheck) delete event.ledger.onChain;
+      return LedgerCheckState.Unavailable;
+    }
+  }
+
+  private async checkOne(
+    ledgerKey: string,
+    expectedTxHash: string | undefined,
+  ): Promise<OnChainCheck> {
+    if (this.verifiedKeys.has(ledgerKey)) return OnChainCheck.Verified;
+
+    const record = await withTimeout(
+      this.fabric.findByLedgerKey(ledgerKey),
+      ON_CHAIN_CHECK_TIMEOUT_MS,
+    );
+    if (!record) return OnChainCheck.NotFound;
+    if (!expectedTxHash || record.txHash !== expectedTxHash) {
+      return OnChainCheck.Mismatch;
+    }
+    if (this.verifiedKeys.size >= VERIFIED_CACHE_LIMIT)
+      this.verifiedKeys.clear();
+    this.verifiedKeys.add(ledgerKey);
+    return OnChainCheck.Verified;
+  }
 
   private async paymentRecordsFor(
     productId: Types.ObjectId,
@@ -216,4 +304,23 @@ export class TraceabilityService {
 /** Last six hex chars, upper-cased: enough to group events, not to look up. */
 export function shortReference(id: Types.ObjectId): string {
   return id.toHexString().slice(-6).toUpperCase();
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`Fabric read timed out after ${ms}ms`)),
+      ms,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
 }
