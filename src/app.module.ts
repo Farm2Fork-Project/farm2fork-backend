@@ -113,9 +113,9 @@ const featureModules = [
         // SECRET and must live OUTSIDE the repo (see .env.example).
         FIREBASE_AUTH_ENABLED: Joi.boolean().default(false),
         FIREBASE_PROJECT_ID: Joi.string().optional(),
-        FIREBASE_SERVICE_ACCOUNT_JSON: Joi.string().optional(),
-        FIREBASE_SERVICE_ACCOUNT_PATH: Joi.string().optional(),
-        GOOGLE_APPLICATION_CREDENTIALS: Joi.string().optional(),
+        FIREBASE_SERVICE_ACCOUNT_JSON: Joi.string().allow('').optional(),
+        FIREBASE_SERVICE_ACCOUNT_PATH: Joi.string().allow('').optional(),
+        GOOGLE_APPLICATION_CREDENTIALS: Joi.string().allow('').optional(),
         // Privileged-role provisioning allowlists (comma-separated emails).
         ADMIN_EMAIL_ALLOWLIST: Joi.string().optional(),
         FINANCIAL_PARTNER_EMAIL_ALLOWLIST: Joi.string().optional(),

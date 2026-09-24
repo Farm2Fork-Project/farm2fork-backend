@@ -25,6 +25,14 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+## Testing the whole flow locally
+
+`docker compose -f docker-compose.local.yml up --build` starts MongoDB, Redis,
+the API, the AI service and the web app together; `pnpm seed:demo` and
+`pnpm smoke:flow` then seed listings and check the flow end to end. See
+[docs/TESTING.md](docs/TESTING.md) for Firebase setup, the mobile app and a
+per-role test script.
+
 ## Project setup
 
 ```bash

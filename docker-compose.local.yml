@@ -1,0 +1,170 @@
+# Complete local test stack: MongoDB (single-node replica set, needed for
+# transactions), Redis, the API, the AI service and the web app.
+#
+#   docker compose -f docker-compose.local.yml up --build
+#
+# Expects the sibling checkouts ../farm2fork-ai and ../farm2fork-web. Reads
+# secrets (Firebase, JWT) from ./.env; everything that must point at another
+# container is overridden below. See docs/TESTING.md for the full walkthrough.
+#
+# Ports on the host:
+#   3002 API (http://localhost:3002/api, Swagger at /api/docs)
+#   3001 web app
+#   8000 AI service
+#   27017 MongoDB (mongodb://localhost:27017/farm2fork?directConnection=true)
+#
+# Blockchain is opt-in: start the Fabric network from ../farm2fork-blockchain,
+# then add `--profile fabric` to also run the outbox worker that writes events
+# to the ledger. Without it ledger events stay "pending" (shown as such, never
+# as verified). See docs/TESTING.md, "Blockchain".
+
+x-api-env: &api-env
+  NODE_ENV: development
+  PORT: '3000'
+  DATABASE_URL: mongodb://mongo:27017/farm2fork?replicaSet=rs0
+  REDIS_URL: redis://redis:6379
+  AI_SERVICE_URL: http://ai:8000
+  AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:-}
+  CORS_ORIGIN: http://localhost:3001
+  WEB_APP_ORIGIN: http://localhost:3001
+  PUBLIC_TRACE_ORIGIN: ${PUBLIC_TRACE_ORIGIN:-http://localhost:3001}
+  WEB_SESSION_COOKIE_SECURE: 'false'
+  PAYMENT_SIMULATOR_ENABLED: 'true'
+  BLOCKCHAIN_WORKER_ENABLED: 'false'
+  FABRIC_READ_ENABLED: 'false'
+  # A host path to the Firebase key cannot resolve inside the container. Use
+  # FIREBASE_SERVICE_ACCOUNT_JSON (inline) or FIREBASE_SERVICE_ACCOUNT_PATH
+  # pointing under /app instead - see docs/TESTING.md.
+  GOOGLE_APPLICATION_CREDENTIALS: ''
+
+services:
+  mongo:
+    image: mongo:8.0
+    container_name: f2f-local-mongo
+    command: ['--replSet', 'rs0', '--bind_ip_all']
+    ports:
+      - '${MONGO_HOST_PORT:-27017}:27017'
+    volumes:
+      - mongo_data:/data/db
+    # Initiates the replica set on first start, then reports healthy once a
+    # primary is elected.
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "try { rs.status().ok } catch (e) { rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'mongo:27017'}]}).ok }; db.hello().isWritablePrimary || quit(1)"
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 5s
+
+  redis:
+    image: redis:8.6.3-alpine3.23
+    container_name: f2f-local-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      target: development
+    container_name: f2f-local-api
+    env_file:
+      - path: .env
+        required: false
+    environment: *api-env
+    ports:
+      - '3002:3000'
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ai:
+        condition: service_started
+    volumes:
+      - .:/app
+      - /app/node_modules
+
+  ai:
+    build:
+      context: ../farm2fork-ai
+      args:
+        # Set to https://pypi.org/simple if download.pytorch.org is blocked.
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+    container_name: f2f-local-ai
+    environment:
+      AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:-}
+    ports:
+      - '8000:8000'
+    volumes:
+      # Drop best_model.pth here once training finishes; until then the
+      # service runs in its labelled "untrained" preview mode.
+      - ../farm2fork-ai/models/checkpoints/grade_cond_dedup:/app/models/checkpoints/grade_cond_dedup:ro
+
+  web:
+    build:
+      context: ../farm2fork-web
+      args:
+        # Baked into the browser bundle, so it must be the host-reachable URL.
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:3002/api
+        NEXT_PUBLIC_FIREBASE_API_KEY: ${NEXT_PUBLIC_FIREBASE_API_KEY:-}
+        NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN:-}
+        NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${NEXT_PUBLIC_FIREBASE_PROJECT_ID:-}
+        NEXT_PUBLIC_FIREBASE_APP_ID: ${NEXT_PUBLIC_FIREBASE_APP_ID:-}
+        NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID:-}
+    container_name: f2f-local-web
+    ports:
+      - '3001:3000'
+    depends_on:
+      - api
+
+  # Writes queued supply-chain events to Hyperledger Fabric. Only started
+  # with `--profile fabric`, after the Fabric network is up.
+  worker:
+    profiles: ['fabric']
+    build:
+      context: .
+      target: development
+    container_name: f2f-local-worker
+    command: pnpm start:worker:dev
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      <<: *api-env
+      # pnpm initialises the anonymous node_modules volume non-interactively.
+      CI: 'true'
+      BLOCKCHAIN_WORKER_ENABLED: 'true'
+      FABRIC_TLS_ROOT_CERT_PATH: /fabric/crypto/peerOrganizations/farm2fork.com/peers/peer0.farm2fork.com/tls/ca.crt
+      FABRIC_IDENTITY_CERT_PATH: /fabric/crypto/peerOrganizations/farm2fork.com/users/Admin@farm2fork.com/msp/signcerts/Admin@farm2fork.com-cert.pem
+      FABRIC_IDENTITY_KEY_PATH: /fabric/crypto/peerOrganizations/farm2fork.com/users/Admin@farm2fork.com/msp/keystore/priv_sk
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - ${FABRIC_CRYPTO_HOST_PATH:-../farm2fork-blockchain/network/organizations}:/fabric/crypto:ro
+    networks:
+      - default
+      - fabric
+
+volumes:
+  mongo_data:
+  redis_data:
+
+networks:
+  fabric:
+    external: true
+    name: ${FABRIC_DOCKER_NETWORK:-farm2fork-fabric}
