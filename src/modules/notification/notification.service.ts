@@ -88,7 +88,7 @@ export class NotificationService {
     // signed in on that device last.
     await this.userModel
       .updateMany(
-        { fcmToken: token, _id: { $ne: new Types.ObjectId(userId) } },
+        { fcmToken: { $eq: token }, _id: { $ne: new Types.ObjectId(userId) } },
         { $unset: { fcmToken: 1 } },
       )
       .exec();
