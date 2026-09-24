@@ -8,7 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { v2 as cloudinary } from 'cloudinary';
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { mkdir, readFile, writeFile } from 'fs/promises';
-import { join, resolve } from 'path';
+import { join, resolve, sep } from 'path';
 import {
   DetectedFile,
   MAX_DOCUMENT_BYTES,
@@ -173,7 +173,12 @@ export class StorageService {
       }
     }
     try {
-      const buffer = await readFile(join(this.uploadDir, scope, name));
+      const baseDir = resolve(this.uploadDir, scope);
+      const filePath = resolve(baseDir, name);
+      if (filePath !== baseDir && !filePath.startsWith(`${baseDir}${sep}`)) {
+        return null;
+      }
+      const buffer = await readFile(filePath);
       return {
         buffer,
         mimeType: detectFile(buffer)?.mimeType ?? 'application/octet-stream',
