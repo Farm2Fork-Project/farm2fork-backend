@@ -109,6 +109,50 @@ describe('FabricGatewayService', () => {
     );
   });
 
+  it('maps a product listed event to immutable ledger arguments', async () => {
+    const timestamp = new Date('2026-08-11T11:00:00.000Z');
+    const record = shipmentRecord({ timestamp });
+    const farmerId = new Types.ObjectId();
+    record.referenceModel = BlockchainReferenceModel.Product;
+    record.referenceId = record.payload.supplyChain!.productId!;
+    record.payload.supplyChain = {
+      ...record.payload.supplyChain!,
+      farmerId,
+      actorId: farmerId,
+      actorRole: 'farmer',
+      eventType: 'listed',
+      location: 'Multan, Punjab',
+    };
+    contract.submitAsync.mockResolvedValue({
+      getStatus: jest.fn().mockResolvedValue({
+        successful: true,
+        transactionId: 'fabric-listed-001',
+        blockNumber: 7n,
+      }),
+    });
+
+    await service.submit(record);
+
+    expect(contract.submitAsync).toHaveBeenCalledWith(
+      'RecordSupplyChainEvent',
+      {
+        arguments: [
+          record._id.toHexString(),
+          record.referenceId.toHexString(),
+          'Product',
+          record.referenceId.toHexString(),
+          farmerId.toHexString(),
+          'listed',
+          'Multan, Punjab',
+          farmerId.toHexString(),
+          'farmer',
+          timestamp.toISOString(),
+        ],
+        endorsingOrganizations: ['Farm2ForkMSP'],
+      },
+    );
+  });
+
   it('rejects incomplete payloads before calling Fabric', async () => {
     const record = paymentRecord();
     record.payload.payment = null;
@@ -120,6 +164,55 @@ describe('FabricGatewayService', () => {
       }),
     );
     expect(contract.submitAsync).not.toHaveBeenCalled();
+  });
+
+  it('reads back the record shape the chaincode actually stores', async () => {
+    // model.BlockchainTransaction: no ledgerKey in the body, blockNumber 0.
+    contract.evaluateTransaction.mockResolvedValue(
+      new TextEncoder().encode(
+        JSON.stringify({
+          type: 'supply_chain_event',
+          referenceId: 'product-1',
+          referenceModel: 'Product',
+          txHash: 'fabric-tx-9',
+          blockNumber: 0,
+          channelName: 'farm2forkchannel',
+          payload: {
+            payment: null,
+            supplyChain: { productId: 'product-1', eventType: 'listed' },
+          },
+          status: 'confirmed',
+          retryCount: 0,
+          createdAt: '2026-08-11T11:00:00.000Z',
+        }),
+      ),
+    );
+
+    await expect(service.findByLedgerKey('outbox-key-1')).resolves.toEqual({
+      ledgerKey: 'outbox-key-1',
+      referenceId: 'product-1',
+      referenceModel: 'Product',
+      txHash: 'fabric-tx-9',
+      channelName: 'farm2forkchannel',
+      blockNumber: undefined,
+      productId: 'product-1',
+    });
+    expect(contract.evaluateTransaction).toHaveBeenCalledWith(
+      'GetTransactionByLedgerKey',
+      'outbox-key-1',
+    );
+  });
+
+  it('keeps serving when a read-only Fabric connection fails', async () => {
+    const readOnlyConfig = {
+      get: jest.fn((key: string) => key === 'blockchain.readEnabled'),
+      getOrThrow: jest.fn(),
+    } as unknown as ConfigService;
+    runtime.connect.mockRejectedValueOnce(new Error('peer unreachable'));
+    const readOnly = new FabricGatewayService(readOnlyConfig, runtime);
+
+    await expect(readOnly.onModuleInit()).resolves.toBeUndefined();
+    expect(readOnly.isAvailable()).toBe(false);
   });
 
   it('maps Fabric missing ledger-key responses to null', async () => {

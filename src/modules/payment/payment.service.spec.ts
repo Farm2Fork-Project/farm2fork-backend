@@ -8,6 +8,8 @@ import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Types } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
+import { NotificationService } from '../notification/notification.service';
+import { TransportService } from '../transport/transport.service';
 import { UserRole } from '../../common/enums/user-role.enum';
 import {
   BlockchainTransaction,
@@ -73,6 +75,8 @@ describe('PaymentService', () => {
   let connection: { startSession: jest.Mock };
   let session: { withTransaction: jest.Mock; endSession: jest.Mock };
   let config: { get: jest.Mock };
+  let notifications: { notifyInBackground: jest.Mock };
+  let transport: { dispatchInBackground: jest.Mock };
 
   beforeEach(async () => {
     orderModel = { findById: jest.fn() };
@@ -93,6 +97,8 @@ describe('PaymentService', () => {
     };
     connection = { startSession: jest.fn().mockResolvedValue(session) };
     config = { get: jest.fn().mockReturnValue(true) };
+    notifications = { notifyInBackground: jest.fn() };
+    transport = { dispatchInBackground: jest.fn() };
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
@@ -106,6 +112,8 @@ describe('PaymentService', () => {
         },
         { provide: getConnectionToken(), useValue: connection },
         { provide: ConfigService, useValue: config },
+        { provide: NotificationService, useValue: notifications },
+        { provide: TransportService, useValue: transport },
       ],
     }).compile();
 
@@ -240,6 +248,13 @@ describe('PaymentService', () => {
       { session },
     );
     expect(session.endSession).toHaveBeenCalledTimes(1);
+    // After commit: buyer and farmer are told, and nearby transporters pinged.
+    expect(
+      notifications.notifyInBackground.mock.calls.map(
+        ([input]) => (input as { type: string }).type,
+      ),
+    ).toEqual(['payment_confirmed', 'payment_confirmed']);
+    expect(transport.dispatchInBackground).toHaveBeenCalledWith(order._id);
   });
 
   it('records a failed payment without changing stock, order, or blockchain state', async () => {
@@ -256,6 +271,7 @@ describe('PaymentService', () => {
     expect(result.status).toBe(PaymentStatus.Failed);
     expect(payment.status).toBe(PaymentStatus.Failed);
     expect(payment.failedAt).toBeInstanceOf(Date);
+    expect(transport.dispatchInBackground).not.toHaveBeenCalled();
     expect(productModel.updateOne).not.toHaveBeenCalled();
     expect(orderModel.findById).not.toHaveBeenCalled();
     expect(blockchainModel.create).not.toHaveBeenCalled();

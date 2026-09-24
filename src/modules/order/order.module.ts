@@ -2,6 +2,10 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AdminModule } from '../admin/admin.module';
 import { MarketplaceModule } from '../marketplace/marketplace.module';
+import {
+  FarmerProfile,
+  FarmerProfileSchema,
+} from '../auth/schemas/farmer-profile.schema';
 import { OrderController } from './order.controller';
 import { OrderService } from './order.service';
 import { Order, OrderSchema } from './schemas/order.schema';
@@ -14,7 +18,10 @@ import { Order, OrderSchema } from './schemas/order.schema';
  */
 @Module({
   imports: [
-    MongooseModule.forFeature([{ name: Order.name, schema: OrderSchema }]),
+    MongooseModule.forFeature([
+      { name: Order.name, schema: OrderSchema },
+      { name: FarmerProfile.name, schema: FarmerProfileSchema },
+    ]),
     MarketplaceModule,
     AdminModule,
   ],

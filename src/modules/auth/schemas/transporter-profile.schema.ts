@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
+import { GeoPoint, GeoPointSchema } from '../../../common/geo/geo-point.schema';
 
 export type TransporterProfileDocument = HydratedDocument<TransporterProfile>;
 
@@ -47,8 +48,26 @@ export class TransporterProfile {
   @Prop({ type: [String], default: [] })
   serviceAreas!: string[];
 
+  /**
+   * Online toggle in the transporter app: only available transporters with
+   * a recent location receive delivery offers.
+   */
   @Prop({ default: true })
   isAvailable!: boolean;
+
+  /** Last location reported by the app while online (foreground only). */
+  @Prop({ type: GeoPointSchema })
+  lastLocation?: GeoPoint;
+
+  @Prop()
+  lastLocationAt?: Date;
+
+  /**
+   * Written by every claim so two concurrent claims by the same transporter
+   * conflict in their transactions: one delivery at a time.
+   */
+  @Prop()
+  lastClaimAt?: Date;
 
   createdAt!: Date;
   updatedAt!: Date;
@@ -56,3 +75,5 @@ export class TransporterProfile {
 
 export const TransporterProfileSchema =
   SchemaFactory.createForClass(TransporterProfile);
+
+TransporterProfileSchema.index({ lastLocation: '2dsphere' });

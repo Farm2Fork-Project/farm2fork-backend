@@ -5,13 +5,14 @@ import {
   BadRequestException,
   ValidationError,
 } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { createSwaggerDocument } from './swagger-document';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const configService = app.get(ConfigService);
 
   // Get configuration values
@@ -22,6 +23,14 @@ async function bootstrap() {
   const swaggerPath = configService.get<string>('SWAGGER_PATH', 'api/docs');
   const nodeEnv = configService.get<string>('NODE_ENV', 'development');
   const corsOrigin = configService.get<string>('CORS_ORIGIN', '');
+  const trustProxy = configService.get<string>('TRUST_PROXY');
+
+  // Behind nginx every request would otherwise share the proxy's IP and the
+  // per-IP rate limits would throttle all users together.
+  if (trustProxy) {
+    const hops = Number(trustProxy);
+    app.set('trust proxy', Number.isInteger(hops) ? hops : trustProxy);
+  }
 
   // Set API prefix
   app.setGlobalPrefix(apiPrefix);

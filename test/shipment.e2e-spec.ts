@@ -1,5 +1,5 @@
 import { ConflictException } from '@nestjs/common';
-import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
+import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
 import {
   getConnectionToken,
   getModelToken,
@@ -33,6 +33,23 @@ import {
   ShipmentStatus,
 } from '../src/modules/transport/schemas/shipment.schema';
 import { TransportService } from '../src/modules/transport/transport.service';
+import { SystemConfigService } from '../src/modules/admin/services/system-config.service';
+import {
+  TransporterProfile,
+  TransporterProfileDocument,
+  TransporterProfileSchema,
+  VehicleType,
+} from '../src/modules/auth/schemas/transporter-profile.schema';
+import { NotificationService } from '../src/modules/notification/notification.service';
+
+// Farm in Faisalabad; "near" is ~5 km away, "far" is Lahore (~120 km).
+const FARM = { lat: 31.42, lng: 73.08 };
+const NEAR = { lat: 31.44, lng: 73.12 };
+const FAR = { lat: 31.52, lng: 74.35 };
+const point = ({ lat, lng }: { lat: number; lng: number }) => ({
+  type: 'Point' as const,
+  coordinates: [lng, lat] as [number, number],
+});
 
 describe('TransportService self-claim transaction integration', () => {
   let replSet: MongoMemoryReplSet;
@@ -43,6 +60,11 @@ describe('TransportService self-claim transaction integration', () => {
   let shipmentModel: Model<ShipmentDocument>;
   let blockchainModel: Model<BlockchainTransactionDocument>;
   let connection: Connection;
+  let transporterModel: Model<TransporterProfileDocument>;
+  const notifications = {
+    notify: jest.fn(() => Promise.resolve()),
+    notifyInBackground: jest.fn(),
+  };
 
   beforeAll(async () => {
     replSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
@@ -52,6 +74,7 @@ describe('TransportService self-claim transaction integration', () => {
         MongooseModule.forFeature([
           { name: Order.name, schema: OrderSchema },
           { name: FarmerProfile.name, schema: FarmerProfileSchema },
+          { name: TransporterProfile.name, schema: TransporterProfileSchema },
           { name: Shipment.name, schema: ShipmentSchema },
           {
             name: BlockchainTransaction.name,
@@ -59,7 +82,17 @@ describe('TransportService self-claim transaction integration', () => {
           },
         ]),
       ],
-      providers: [TransportService],
+      providers: [
+        TransportService,
+        {
+          provide: SystemConfigService,
+          useValue: {
+            getDeliverySettings: () =>
+              Promise.resolve(SystemConfigService.defaultDeliverySettings),
+          },
+        },
+        { provide: NotificationService, useValue: notifications },
+      ],
     }).compile();
 
     service = moduleRef.get(TransportService);
@@ -68,7 +101,13 @@ describe('TransportService self-claim transaction integration', () => {
     shipmentModel = moduleRef.get(getModelToken(Shipment.name));
     blockchainModel = moduleRef.get(getModelToken(BlockchainTransaction.name));
     connection = moduleRef.get(getConnectionToken());
-    await shipmentModel.init();
+    transporterModel = moduleRef.get(getModelToken(TransporterProfile.name));
+    // Build the unique and 2dsphere indexes before querying.
+    await Promise.all([
+      shipmentModel.init(),
+      orderModel.init(),
+      transporterModel.init(),
+    ]);
   });
 
   afterAll(async () => {
@@ -79,8 +118,8 @@ describe('TransportService self-claim transaction integration', () => {
 
   it('allows exactly one concurrent transporter claim and records one shipment event', async () => {
     const { order } = await createClaimableOrder();
-    const transporterA = new Types.ObjectId();
-    const transporterB = new Types.ObjectId();
+    const transporterA = await onlineTransporter();
+    const transporterB = await onlineTransporter();
 
     const results = await Promise.allSettled([
       service.claim(order.id, transporterA.toHexString()),
@@ -117,7 +156,7 @@ describe('TransportService self-claim transaction integration', () => {
       productB,
     ]);
 
-    await service.claim(order.id, new Types.ObjectId().toHexString());
+    await service.claim(order.id, (await onlineTransporter()).toHexString());
 
     const shipment = await shipmentModel.findOne({ orderId: order._id }).exec();
     expect(shipment).not.toBeNull();
@@ -163,12 +202,93 @@ describe('TransportService self-claim transaction integration', () => {
     });
 
     await expect(
-      service.claim(order.id, new Types.ObjectId().toHexString()),
+      service.claim(order.id, (await onlineTransporter()).toHexString()),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
+  it('lets one transporter hold only one delivery, even when accepting two at once', async () => {
+    const [{ order: first }, { order: second }] = await Promise.all([
+      createClaimableOrder(),
+      createClaimableOrder(),
+    ]);
+    const transporter = (await onlineTransporter()).toHexString();
+
+    const results = await Promise.allSettled([
+      service.claim(first.id, transporter),
+      service.claim(second.id, transporter),
+    ]);
+
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(
+      await shipmentModel.countDocuments({
+        transporterId: new Types.ObjectId(transporter),
+      }),
+    ).toBe(1);
+  });
+
+  it('offers nearby orders nearest first, skips far and declined ones, and pings only free nearby transporters', async () => {
+    await orderModel.deleteMany({});
+    await shipmentModel.deleteMany({});
+    await transporterModel.deleteMany({});
+    const { order: near } = await createClaimableOrder();
+    const { order: declined } = await createClaimableOrder();
+    const { order: farAway } = await createClaimableOrder(undefined, {
+      lat: 33.68,
+      lng: 73.04,
+    });
+    const me = await onlineTransporter();
+    const busy = await onlineTransporter();
+    await onlineTransporter(FAR);
+    await onlineTransporter(NEAR, { isAvailable: false });
+    await shipmentModel.create({
+      orderId: new Types.ObjectId(),
+      transporterId: busy,
+      status: ShipmentStatus.InTransit,
+      statusHistory: [],
+    });
+    await service.decline(declined.id, me.toHexString());
+
+    const offers = await service.findAvailable(me.toHexString());
+    expect(offers.map((o) => o.orderId)).toEqual([near.id]);
+    expect(offers.map((o) => o.orderId)).not.toContain(farAway.id);
+
+    notifications.notify.mockClear();
+    await expect(service.dispatch(near._id)).resolves.toBe(1);
+    expect(notifications.notify).toHaveBeenCalledWith(
+      expect.objectContaining({ userIds: [me] }),
+    );
+  });
+
+  it('refuses an accept from outside the dispatch radius', async () => {
+    const { order } = await createClaimableOrder();
+    const far = await onlineTransporter(FAR);
+    await expect(service.claim(order.id, far.toHexString())).rejects.toThrow(
+      'outside your area',
+    );
+  });
+
+  async function onlineTransporter(
+    at = NEAR,
+    overrides: Record<string, unknown> = {},
+  ): Promise<Types.ObjectId> {
+    const userId = new Types.ObjectId();
+    await transporterModel.create({
+      userId,
+      vehicleType: VehicleType.Van,
+      vehicleNumber: 'LEA-1234',
+      licenseNumber: `LIC-${userId.toHexString()}`,
+      cnic: `CNIC-${userId.toHexString()}`,
+      isAvailable: true,
+      lastLocation: point(at),
+      lastLocationAt: new Date(),
+      ...overrides,
+    });
+    return userId;
+  }
+
   async function createClaimableOrder(
     productIds = [new Types.ObjectId()],
+    farm = FARM,
   ): Promise<{ order: OrderDocument }> {
     const buyerId = new Types.ObjectId();
     const farmerId = new Types.ObjectId();
@@ -180,9 +300,13 @@ describe('TransportService self-claim transaction integration', () => {
         address: 'Green Farm, Canal Road',
         city: 'Faisalabad',
         province: 'Punjab',
+        ...farm,
       },
     });
     const order = await orderModel.create({
+      pickupLocation: point(farm),
+      deliveryFee: 1270,
+      deliveryDistanceKm: 44.6,
       buyerId,
       farmerId,
       items: productIds.map((productId, index) => ({
@@ -201,6 +325,8 @@ describe('TransportService self-claim transaction integration', () => {
         street: '21 Market Road',
         city: 'Lahore',
         province: 'Punjab',
+        lat: 31.52,
+        lng: 74.35,
       },
       status: OrderStatus.Paid,
     });

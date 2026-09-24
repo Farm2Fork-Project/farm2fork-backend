@@ -18,6 +18,7 @@ import {
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ApiErrorResponses } from '../../common/decorators/api-error-responses.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { AuthRateLimit } from '../../common/rate-limit/rate-limits';
 import type { RequestUser } from '../../common/guards/roles.guard';
 import { AuthService } from './auth.service';
 import {
@@ -39,6 +40,7 @@ export class AuthController {
   ) {}
 
   @Public()
+  @AuthRateLimit()
   @Post('firebase')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -53,6 +55,7 @@ export class AuthController {
   }
 
   @Public()
+  @AuthRateLimit()
   @Post('firebase/onboard/farmer')
   @ApiOperation({
     summary: 'Onboard a farmer for a verified Firebase identity (US-01)',
@@ -66,6 +69,7 @@ export class AuthController {
   }
 
   @Public()
+  @AuthRateLimit()
   @Post('firebase/onboard/buyer')
   @ApiOperation({
     summary: 'Onboard a buyer for a verified Firebase identity (US-01)',
@@ -79,6 +83,7 @@ export class AuthController {
   }
 
   @Public()
+  @AuthRateLimit()
   @Post('firebase/onboard/transporter')
   @ApiOperation({
     summary: 'Onboard a transporter for a verified Firebase identity (US-01)',
@@ -92,6 +97,7 @@ export class AuthController {
   }
 
   @Public()
+  @AuthRateLimit()
   @Post('firebase/onboard/financial-partner')
   @ApiOperation({
     summary:
@@ -106,6 +112,7 @@ export class AuthController {
   }
 
   @Public()
+  @AuthRateLimit()
   @Post('web/session')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -125,6 +132,7 @@ export class AuthController {
   }
 
   @Public()
+  @AuthRateLimit()
   @Post('web/onboard/farmer')
   @ApiOperation({
     summary: 'Onboard a verified Firebase farmer and create a web session',
@@ -141,6 +149,7 @@ export class AuthController {
   }
 
   @Public()
+  @AuthRateLimit()
   @Post('web/onboard/buyer')
   @ApiOperation({
     summary: 'Onboard a verified Firebase buyer and create a web session',
@@ -157,6 +166,7 @@ export class AuthController {
   }
 
   @Public()
+  @AuthRateLimit()
   @Post('web/onboard/transporter')
   @ApiOperation({
     summary: 'Onboard a verified Firebase transporter and create a web session',
@@ -173,6 +183,7 @@ export class AuthController {
   }
 
   @Public()
+  @AuthRateLimit()
   @Post('web/onboard/financial-partner')
   @ApiOperation({
     summary:
@@ -190,6 +201,7 @@ export class AuthController {
   }
 
   @Public()
+  @AuthRateLimit()
   @Post('web/logout')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Clear the HTTP-only Firebase web session cookie' })

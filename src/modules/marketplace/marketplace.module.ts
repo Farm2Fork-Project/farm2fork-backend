@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { AuthModule } from '../auth/auth.module';
+import { BlockchainModule } from '../blockchain/blockchain.module';
 import { MarketplaceController } from './marketplace.controller';
 import { MarketplaceService } from './marketplace.service';
 import { Product, ProductSchema } from './schemas/product.schema';
@@ -11,6 +13,8 @@ import { Product, ProductSchema } from './schemas/product.schema';
 @Module({
   imports: [
     MongooseModule.forFeature([{ name: Product.name, schema: ProductSchema }]),
+    AuthModule,
+    BlockchainModule,
   ],
   controllers: [MarketplaceController],
   providers: [MarketplaceService],
