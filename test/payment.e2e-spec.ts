@@ -23,6 +23,8 @@ import {
   OrderStatus,
 } from '../src/modules/order/schemas/order.schema';
 import { PaymentService } from '../src/modules/payment/payment.service';
+import { NotificationService } from '../src/modules/notification/notification.service';
+import { TransportService } from '../src/modules/transport/transport.service';
 import {
   Payment,
   PaymentDocument,
@@ -32,6 +34,7 @@ import {
 } from '../src/modules/payment/schemas/payment.schema';
 
 describe('PaymentService transaction integration', () => {
+  const transport = { dispatchInBackground: jest.fn() };
   let replSet: MongoMemoryReplSet;
   let moduleRef: TestingModule;
   let service: PaymentService;
@@ -58,6 +61,11 @@ describe('PaymentService transaction integration', () => {
       ],
       providers: [
         PaymentService,
+        {
+          provide: NotificationService,
+          useValue: { notifyInBackground: jest.fn() },
+        },
+        { provide: TransportService, useValue: transport },
         {
           provide: ConfigService,
           useValue: {
@@ -152,5 +160,7 @@ describe('PaymentService transaction integration', () => {
       status: PaymentStatus.Success,
     });
     expect(await blockchainModel.countDocuments({ referenceId: payment._id })).toBe(1);
+    // Transporters are pinged once, after commit, not again on the replay.
+    expect(transport.dispatchInBackground).toHaveBeenCalledTimes(1);
   });
 });

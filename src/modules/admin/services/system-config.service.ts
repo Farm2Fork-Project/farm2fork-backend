@@ -33,6 +33,9 @@ export class SystemConfigService {
   /** Used when platform_fee_percent is missing or invalid in the DB. */
   static readonly defaultPlatformFeePercent = 5;
 
+  /** Illustrative PKR bounds until the owner seeds min/max_loan_amount. */
+  static readonly defaultLoanLimits = { min: 10_000, max: 1_000_000 };
+
   /** Illustrative PKR defaults until the owner seeds real rates. */
   static readonly defaultDeliverySettings: DeliverySettings = {
     baseFee: 150,
@@ -100,6 +103,27 @@ export class SystemConfigService {
         ),
       ]);
     return { baseFee, feePerKm, roadFactor, radiusKm, locationMaxAgeMinutes };
+  }
+
+  /** Loan amount bounds in PKR (master context 5.17 keys). */
+  async getLoanLimits(): Promise<{ min: number; max: number }> {
+    const [rawMin, rawMax] = await Promise.all([
+      this.readValue(SystemConfigKey.MinLoanAmount),
+      this.readValue(SystemConfigKey.MaxLoanAmount),
+    ]);
+    const toAmount = (raw: unknown) => {
+      const n =
+        typeof raw === 'number'
+          ? raw
+          : typeof raw === 'string'
+            ? Number(raw)
+            : NaN;
+      return Number.isFinite(n) && n > 0 ? n : null;
+    };
+    const d = SystemConfigService.defaultLoanLimits;
+    const min = toAmount(rawMin) ?? d.min;
+    const max = toAmount(rawMax) ?? d.max;
+    return min <= max ? { min, max } : d;
   }
 
   private async readValue(key: SystemConfigKey): Promise<unknown> {

@@ -15,7 +15,7 @@ const FARMS = [
     profile: {
       farmName: 'Green Valley Farm (demo)',
       cnic: 'DEMO-00000-0000001',
-      farmLocation: { address: 'Chak 5, Canal Road', city: 'Multan', province: 'Punjab' },
+      farmLocation: { address: 'Chak 5, Canal Road', city: 'Multan', province: 'Punjab', lat: 30.1968, lng: 71.4782 },
       cropTypes: ['mango', 'wheat'],
       certifications: [],
     },
@@ -31,7 +31,7 @@ const FARMS = [
     profile: {
       farmName: 'Ravi Fields (demo)',
       cnic: 'DEMO-00000-0000002',
-      farmLocation: { address: 'Village Kot Pindi Das', city: 'Sheikhupura', province: 'Punjab' },
+      farmLocation: { address: 'Village Kot Pindi Das', city: 'Sheikhupura', province: 'Punjab', lat: 31.7167, lng: 73.9850 },
       cropTypes: ['rice', 'maize'],
       certifications: [],
     },
@@ -53,6 +53,11 @@ let created = 0;
 let skipped = 0;
 for (const farm of FARMS) {
   const farmer = await ensureUser(connection.db, { email: farm.email, role: 'farmer', profile: farm.profile });
+  // Demo farms always carry a map pin (delivery pricing needs it), also when
+  // they were seeded before pins existed.
+  await connection.db
+    .collection('farmer_profiles')
+    .updateOne({ userId: farmer._id }, { $set: { farmLocation: farm.profile.farmLocation } });
   const token = tokenFor(farmer, env.jwtSecret);
   const existing = await call('GET', '/products/mine?limit=100', { token });
   const names = new Set(existing.data.map((p) => p.name));

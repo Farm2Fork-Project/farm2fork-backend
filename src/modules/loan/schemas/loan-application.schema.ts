@@ -75,7 +75,10 @@ export class LoanApplication {
   @Prop()
   reviewNote?: string;
 
-  /** documents (master context 6.6) - sensitive uploaded file URLs. */
+  /**
+   * documents (master context 6.6) - sensitive. Stored as opaque storage
+   * references, only ever returned as short-lived signed links.
+   */
   @Prop({ type: [String], default: [], select: false })
   documents!: string[];
 
@@ -88,3 +91,6 @@ export class LoanApplication {
 
 export const LoanApplicationSchema =
   SchemaFactory.createForClass(LoanApplication);
+
+LoanApplicationSchema.index({ applicantId: 1, status: 1 });
+LoanApplicationSchema.index({ status: 1, createdAt: -1 });
