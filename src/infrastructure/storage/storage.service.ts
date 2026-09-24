@@ -8,7 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { v2 as cloudinary } from 'cloudinary';
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { mkdir, readFile, realpath, writeFile } from 'fs/promises';
-import { join, resolve, sep } from 'path';
+import { basename, join, resolve, sep } from 'path';
 import {
   DetectedFile,
   MAX_DOCUMENT_BYTES,
@@ -160,6 +160,8 @@ export class StorageService {
     signature?: { exp: string; sig: string },
   ): Promise<{ buffer: Buffer; mimeType: string } | null> {
     if (!LOCAL_FILE_NAME.test(name)) return null;
+    const safeName = basename(name);
+    if (safeName !== name) return null;
     if (scope === 'private') {
       const exp = Number(signature?.exp);
       if (!Number.isInteger(exp) || exp < Date.now() / 1000) return null;
@@ -174,7 +176,7 @@ export class StorageService {
     }
     try {
       const baseDir = resolve(this.uploadDir, scope);
-      const filePath = resolve(baseDir, name);
+      const filePath = join(baseDir, safeName);
       if (filePath !== baseDir && !filePath.startsWith(`${baseDir}${sep}`)) {
         return null;
       }
