@@ -7,6 +7,19 @@ import {
   SystemConfigKey,
 } from '../schemas/system-config.schema';
 
+export interface DeliverySettings {
+  /** Flat PKR amount every delivery starts at. */
+  baseFee: number;
+  /** PKR per estimated road kilometre. */
+  feePerKm: number;
+  /** Straight-line distance x factor approximates road distance. */
+  roadFactor: number;
+  /** Transporters within this distance of the farm are offered the order. */
+  radiusKm: number;
+  /** A transporter location older than this is not used for matching. */
+  locationMaxAgeMinutes: number;
+}
+
 /**
  * Typed access layer over the system_config collection (master context 5.17 /
  * 6.2). No client or other service may read system_config directly — every
@@ -19,6 +32,15 @@ export class SystemConfigService {
 
   /** Used when platform_fee_percent is missing or invalid in the DB. */
   static readonly defaultPlatformFeePercent = 5;
+
+  /** Illustrative PKR defaults until the owner seeds real rates. */
+  static readonly defaultDeliverySettings: DeliverySettings = {
+    baseFee: 150,
+    feePerKm: 25,
+    roadFactor: 1.3,
+    radiusKm: 25,
+    locationMaxAgeMinutes: 60,
+  };
 
   constructor(
     @InjectModel(SystemConfig.name)
@@ -41,6 +63,43 @@ export class SystemConfigService {
       return SystemConfigService.defaultPlatformFeePercent;
     }
     return value;
+  }
+
+  /**
+   * Delivery pricing and dispatch settings. Each key falls back to its
+   * default independently when missing or out of range.
+   */
+  async getDeliverySettings(): Promise<DeliverySettings> {
+    const read = async (
+      key: SystemConfigKey,
+      fallback: number,
+      min: number,
+      max: number,
+    ): Promise<number> => {
+      const raw = await this.readValue(key);
+      const n =
+        typeof raw === 'number'
+          ? raw
+          : typeof raw === 'string'
+            ? Number(raw)
+            : NaN;
+      return Number.isFinite(n) && n >= min && n <= max ? n : fallback;
+    };
+    const d = SystemConfigService.defaultDeliverySettings;
+    const [baseFee, feePerKm, roadFactor, radiusKm, locationMaxAgeMinutes] =
+      await Promise.all([
+        read(SystemConfigKey.DeliveryBaseFee, d.baseFee, 0, 100_000),
+        read(SystemConfigKey.DeliveryFeePerKm, d.feePerKm, 0, 10_000),
+        read(SystemConfigKey.DeliveryRoadFactor, d.roadFactor, 1, 3),
+        read(SystemConfigKey.DispatchRadiusKm, d.radiusKm, 1, 500),
+        read(
+          SystemConfigKey.TransporterLocationMaxAgeMinutes,
+          d.locationMaxAgeMinutes,
+          1,
+          24 * 60,
+        ),
+      ]);
+    return { baseFee, feePerKm, roadFactor, radiusKm, locationMaxAgeMinutes };
   }
 
   private async readValue(key: SystemConfigKey): Promise<unknown> {

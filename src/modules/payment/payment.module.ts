@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { BlockchainModule } from '../blockchain/blockchain.module';
 import { MarketplaceModule } from '../marketplace/marketplace.module';
 import { OrderModule } from '../order/order.module';
+import { TransportModule } from '../transport/transport.module';
 import { PaymentController } from './payment.controller';
 import { PaymentService } from './payment.service';
 import { Payment, PaymentSchema } from './schemas/payment.schema';
@@ -18,6 +19,7 @@ import { Payment, PaymentSchema } from './schemas/payment.schema';
     OrderModule,
     MarketplaceModule,
     BlockchainModule,
+    TransportModule,
   ],
   controllers: [PaymentController],
   providers: [PaymentService],

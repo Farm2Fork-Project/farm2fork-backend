@@ -1,7 +1,17 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  Put,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
@@ -16,8 +26,11 @@ import {
   AvailableDeliveryResponseDto,
   ClaimShipmentDto,
   ShipmentResponseDto,
+  TransporterStatusDto,
+  UpdateAvailabilityDto,
   UpdateShipmentStatusDto,
 } from './dto';
+import { LatLngDto } from '../../common/geo/geo';
 import { TransportService } from './transport.service';
 
 @ApiTags('Shipments')
@@ -26,24 +39,86 @@ import { TransportService } from './transport.service';
 export class TransportController {
   constructor(private readonly transportService: TransportService) {}
 
+  @Get('transporter/status')
+  @Roles(UserRole.Transporter)
+  @ApiOperation({
+    summary: 'My online state, location freshness and delivery in progress',
+  })
+  @ApiOkResponse({ type: TransporterStatusDto })
+  @ApiErrorResponses(401, 403, 404)
+  status(@CurrentUser() user: RequestUser): Promise<TransporterStatusDto> {
+    return this.transportService.getTransporterStatus(user.id);
+  }
+
+  @Put('transporter/availability')
+  @Roles(UserRole.Transporter)
+  @ApiOperation({
+    summary: 'Go online (with current location) or offline',
+    description:
+      'Only online transporters with a recent location are offered deliveries.',
+  })
+  @ApiOkResponse({ type: TransporterStatusDto })
+  @ApiErrorResponses(400, 401, 403, 404)
+  availability(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: UpdateAvailabilityDto,
+  ): Promise<TransporterStatusDto> {
+    return this.transportService.updateAvailability(user.id, dto);
+  }
+
+  @Put('transporter/location')
+  @HttpCode(204)
+  @Roles(UserRole.Transporter)
+  @ApiOperation({
+    summary: 'Report current location while the app is open and online',
+  })
+  @ApiNoContentResponse()
+  @ApiErrorResponses(400, 401, 403, 404)
+  async location(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: LatLngDto,
+  ): Promise<void> {
+    await this.transportService.updateLocation(user.id, dto);
+  }
+
   @Get('available')
   @Roles(UserRole.Transporter)
   @ApiOperation({
-    summary: 'List paid orders available for transporter self-claim',
+    summary: 'Delivery offers near me, nearest farm first',
     description:
-      'The response deliberately omits street addresses and buyer contact details.',
+      'Paid, unclaimed orders whose farm is within the dispatch radius of your recent location, each with its fixed delivery fee. Empty while offline or during a delivery. The drop-off is approximate (~1 km) and has no street address until you accept.',
   })
   @ApiOkResponse({ type: [AvailableDeliveryResponseDto] })
-  @ApiErrorResponses(401, 403)
-  findAvailable(): Promise<AvailableDeliveryResponseDto[]> {
-    return this.transportService.findAvailable();
+  @ApiErrorResponses(401, 403, 404)
+  findAvailable(
+    @CurrentUser() user: RequestUser,
+  ): Promise<AvailableDeliveryResponseDto[]> {
+    return this.transportService.findAvailable(user.id);
+  }
+
+  @Post('offers/:orderId/decline')
+  @HttpCode(204)
+  @Roles(UserRole.Transporter)
+  @ApiOperation({ summary: 'Decline a delivery offer (hides it for you)' })
+  @ApiParam({ name: 'orderId', description: 'Order id of the offer' })
+  @ApiNoContentResponse()
+  @ApiErrorResponses(401, 403, 404)
+  async decline(
+    @CurrentUser() user: RequestUser,
+    @Param('orderId') orderId: string,
+  ): Promise<void> {
+    await this.transportService.decline(orderId, user.id);
   }
 
   @Post('claims')
   @Roles(UserRole.Transporter)
-  @ApiOperation({ summary: 'Atomically claim an available delivery' })
+  @ApiOperation({
+    summary: 'Accept a delivery offer',
+    description:
+      'The first transporter to accept gets the delivery; others receive 409. Requires being online, near the farm and without a delivery in progress.',
+  })
   @ApiCreatedResponse({ type: ShipmentResponseDto })
-  @ApiErrorResponses(400, 401, 403, 409)
+  @ApiErrorResponses(400, 401, 403, 404, 409)
   claim(
     @CurrentUser() user: RequestUser,
     @Body() dto: ClaimShipmentDto,

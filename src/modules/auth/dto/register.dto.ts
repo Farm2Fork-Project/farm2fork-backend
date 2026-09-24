@@ -4,7 +4,10 @@ import {
   IsArray,
   IsEnum,
   IsIn,
+  IsLatitude,
+  IsLongitude,
   IsNotEmpty,
+  Max,
   MaxLength,
   IsNumber,
   IsOptional,
@@ -13,6 +16,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { PAKISTAN_BOUNDS } from '../../../common/geo/geo';
 
 /** Pakistani CNIC: 13 digits, optionally formatted as 00000-0000000-0. */
 export const CNIC_REGEX = /^\d{5}-?\d{7}-?\d$/;
@@ -29,9 +33,9 @@ export const PAKISTAN_PROVINCES = [
 ] as const;
 
 /**
- * A farm's pickup location. Street/village, city and province are all
- * required: transporters only see (and can only claim) orders whose farm has
- * a complete location, so an incomplete one silently blocks delivery.
+ * A farm's pickup location. Street/village, city, province and the map pin
+ * are all required: buyers can only check out (the delivery fee is priced
+ * from the pin) and transporters can only be matched when the farm has one.
  */
 export class FarmLocationDto {
   @ApiProperty({ example: 'Chak 5, Canal Road' })
@@ -50,15 +54,23 @@ export class FarmLocationDto {
   @IsIn(PAKISTAN_PROVINCES)
   province!: (typeof PAKISTAN_PROVINCES)[number];
 
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsNumber()
-  lat?: number;
+  @ApiProperty({
+    example: 30.1575,
+    description: 'Farm pin latitude (inside Pakistan)',
+  })
+  @IsLatitude()
+  @Min(PAKISTAN_BOUNDS.minLat, { message: 'Farm pin must be inside Pakistan' })
+  @Max(PAKISTAN_BOUNDS.maxLat, { message: 'Farm pin must be inside Pakistan' })
+  lat!: number;
 
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsNumber()
-  lng?: number;
+  @ApiProperty({
+    example: 71.5249,
+    description: 'Farm pin longitude (inside Pakistan)',
+  })
+  @IsLongitude()
+  @Min(PAKISTAN_BOUNDS.minLng, { message: 'Farm pin must be inside Pakistan' })
+  @Max(PAKISTAN_BOUNDS.maxLng, { message: 'Farm pin must be inside Pakistan' })
+  lng!: number;
 }
 
 export class GeoPointDto {
