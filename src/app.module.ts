@@ -122,7 +122,7 @@ const featureModules = [
         // Firebase web session (HTTP-only cookie) + CSRF/origin protection.
         WEB_APP_ORIGIN: Joi.string().optional(),
         // Public origin encoded in product QR codes (defaults to WEB_APP_ORIGIN).
-        PUBLIC_TRACE_ORIGIN: Joi.string().uri().optional(),
+        PUBLIC_TRACE_ORIGIN: Joi.string().uri().allow('').optional(),
         WEB_SESSION_TTL_SECONDS: Joi.number().integer().min(300).default(86_400),
         WEB_SESSION_COOKIE_NAME: Joi.string().default('f2f_session'),
         WEB_SESSION_COOKIE_SECURE: Joi.boolean().default(true),
@@ -131,10 +131,10 @@ const featureModules = [
         RATE_LIMIT_PER_MINUTE: Joi.number().integer().min(1).default(300),
         // Express "trust proxy" (e.g. 1 or "loopback") so limits key on the
         // real client IP behind nginx instead of the proxy's address.
-        TRUST_PROXY: Joi.string().optional(),
+        TRUST_PROXY: Joi.string().allow('').optional(),
         // FastAPI AI service (farm2fork-ai).
-        AI_SERVICE_URL: Joi.string().uri().optional(),
-        AI_SERVICE_TOKEN: Joi.string().optional(),
+        AI_SERVICE_URL: Joi.string().uri().allow('').optional(),
+        AI_SERVICE_TOKEN: Joi.string().allow('').optional(),
         AI_SERVICE_TIMEOUT_MS: Joi.number().integer().min(1000).default(20_000),
       }),
       validationOptions: {
