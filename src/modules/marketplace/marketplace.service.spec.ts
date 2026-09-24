@@ -71,8 +71,13 @@ describe('MarketplaceService', () => {
     findById: jest.Mock;
     countDocuments: jest.Mock;
   };
-  let blockchainModel: { create: jest.Mock };
-  let farmerProfileModel: { findOne: jest.Mock };
+  let blockchainModel: { create: jest.Mock; find: jest.Mock };
+  let farmerProfileModel: { findOne: jest.Mock; find: jest.Mock };
+  const leanQuery = (result: unknown) => ({
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockReturnThis(),
+    exec: jest.fn().mockResolvedValue(result),
+  });
   let session: { withTransaction: jest.Mock; endSession: jest.Mock };
   let configValues: Record<string, string | undefined>;
 
@@ -100,8 +105,12 @@ describe('MarketplaceService', () => {
           docs.map((doc) => ({ ...doc, _id: new Types.ObjectId() })),
         ),
       ),
+      find: jest.fn().mockReturnValue(leanQuery([])),
     };
-    farmerProfileModel = { findOne: jest.fn() };
+    farmerProfileModel = {
+      findOne: jest.fn(),
+      find: jest.fn().mockReturnValue(leanQuery([])),
+    };
     farmerProfileReturns({
       farmLocation: { city: 'Multan', province: 'Punjab' },
     });
@@ -386,6 +395,59 @@ describe('MarketplaceService', () => {
         'https://farm2fork.com/trace/6a2fe77bb77795516febc287',
       );
       expect(result.qrImageDataUri).toMatch(/^data:image\/png;base64,/);
+    });
+  });
+
+  describe('public farm identity and origin ledger state', () => {
+    it('attaches both with one batched lookup each, never personal data', async () => {
+      const recordId = new Types.ObjectId();
+      const otherFarmer = new Types.ObjectId();
+      const chain = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        exec: jest
+          .fn()
+          .mockResolvedValue([
+            fakeProduct({ initialBlockchainRecordId: recordId }),
+            fakeProduct({ id: 'p2', initialBlockchainRecordId: undefined }),
+            fakeProduct({ id: 'p3', farmerId: otherFarmer }),
+          ]),
+      };
+      model.find.mockReturnValue(chain);
+      model.countDocuments.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(3),
+      });
+      farmerProfileModel.find.mockReturnValue(
+        leanQuery([
+          {
+            userId: new Types.ObjectId(FARMER),
+            farmName: 'Green Valley Farm',
+            farmLocation: { city: 'Multan', province: 'Punjab' },
+          },
+        ]),
+      );
+      blockchainModel.find.mockReturnValue(
+        leanQuery([{ _id: recordId, status: BlockchainTxStatus.Confirmed }]),
+      );
+
+      const result = await service.findAll({});
+
+      expect(farmerProfileModel.find).toHaveBeenCalledTimes(1);
+      expect(blockchainModel.find).toHaveBeenCalledTimes(1);
+      const select = farmerProfileModel.find.mock.results[0].value.select;
+      expect(select).toHaveBeenCalledWith(
+        'userId farmName farmLocation.city farmLocation.province',
+      );
+      expect(result.data[0].farmer).toEqual({
+        farmName: 'Green Valley Farm',
+        city: 'Multan',
+        province: 'Punjab',
+      });
+      expect(result.data[0].originLedgerStatus).toBe('confirmed');
+      expect(result.data[1].originLedgerStatus).toBe('missing');
+      // Farmer without a profile: null, not an invented placeholder.
+      expect(result.data[2].farmer).toBeNull();
     });
   });
 });
