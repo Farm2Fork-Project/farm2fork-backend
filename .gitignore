@@ -34,3 +34,4 @@ serviceAccount*.json
 # Local package and TypeScript incremental-build caches
 .pnpm-store/
 *.tsbuildinfo
+/uploads

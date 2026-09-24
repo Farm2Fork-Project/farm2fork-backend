@@ -12,6 +12,12 @@ export enum SystemConfigKey {
   MaxLoanAmount = 'max_loan_amount',
   MinLoanAmount = 'min_loan_amount',
   SupportedGateways = 'supported_gateways',
+  // Delivery pricing and dispatch (owner-approved, see DeliverySettings).
+  DeliveryBaseFee = 'delivery_base_fee',
+  DeliveryFeePerKm = 'delivery_fee_per_km',
+  DeliveryRoadFactor = 'delivery_road_factor',
+  DispatchRadiusKm = 'dispatch_radius_km',
+  TransporterLocationMaxAgeMinutes = 'transporter_location_max_age_minutes',
 }
 
 @Schema({

@@ -24,6 +24,13 @@ export class ShipmentAddress {
 
   @Prop()
   zip?: string;
+
+  /** Map pin, for navigation once the delivery is accepted. */
+  @Prop()
+  lat?: number;
+
+  @Prop()
+  lng?: number;
 }
 const ShipmentAddressSchema = SchemaFactory.createForClass(ShipmentAddress);
 
@@ -92,6 +99,10 @@ export class Shipment {
   statusHistory!: ShipmentStatusHistoryEntry[];
 
   @Prop()
+  /** Delivery fee snapshot from the order: what the transporter earns. */
+  @Prop({ min: 0 })
+  deliveryFee?: number;
+
   estimatedDelivery?: Date;
 
   @Prop()

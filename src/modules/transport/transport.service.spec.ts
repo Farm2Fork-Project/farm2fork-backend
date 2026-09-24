@@ -10,7 +10,14 @@ import {
   BlockchainTxStatus,
   BlockchainTxType,
 } from '../blockchain/schemas/blockchain-transaction.schema';
+import {
+  DeliverySettings,
+  SystemConfigService,
+} from '../admin/services/system-config.service';
 import { FarmerProfile } from '../auth/schemas/farmer-profile.schema';
+import { TransporterProfile } from '../auth/schemas/transporter-profile.schema';
+import { NotificationService } from '../notification/notification.service';
+import { NotificationType } from '../notification/schemas/notification.schema';
 import { Order, OrderStatus } from '../order/schemas/order.schema';
 import { Shipment, ShipmentStatus } from './schemas/shipment.schema';
 import { TransportService } from './transport.service';
@@ -22,6 +29,35 @@ const query = <T>(value: T) => ({
 const transactionQuery = <T>(value: T) => ({
   session: jest.fn().mockReturnThis(),
   exec: jest.fn<() => Promise<T>>().mockResolvedValue(value),
+});
+
+/** Any Mongoose query chain (select/lean/limit/...) resolving to value. */
+const chain = <T>(value: T) => {
+  const q: Record<string, unknown> = {
+    exec: jest.fn<() => Promise<T>>().mockResolvedValue(value),
+  };
+  for (const method of ['select', 'lean', 'limit', 'sort', 'session']) {
+    q[method] = jest.fn(() => q);
+  }
+  return q;
+};
+
+type GeoFilter = Record<
+  string,
+  { $nearSphere: { $geometry: unknown; $maxDistance: number } }
+>;
+
+// Farm pin in Faisalabad; the transporter is ~5 km away.
+const FARM_PIN = { type: 'Point', coordinates: [73.08, 31.42] };
+const NEAR_TRANSPORTER = { type: 'Point', coordinates: [73.12, 31.44] };
+const FAR_TRANSPORTER = { type: 'Point', coordinates: [74.35, 31.52] };
+
+const makeTransporter = (overrides: Record<string, unknown> = {}) => ({
+  userId: new Types.ObjectId(transporterId),
+  isAvailable: true,
+  lastLocation: NEAR_TRANSPORTER,
+  lastLocationAt: new Date(),
+  ...overrides,
 });
 
 const orderId = '66a2fe77bb77795516febc50';
@@ -107,8 +143,18 @@ describe('TransportService', () => {
     create: jest.Mock;
     find: jest.Mock;
     findById: jest.Mock;
+    findOne: jest.Mock;
+    exists: jest.Mock;
+    distinct: jest.Mock;
   };
   let blockchainModel: { create: jest.Mock };
+  let transporterProfileModel: {
+    find: jest.Mock;
+    findOne: jest.Mock;
+    findOneAndUpdate: jest.Mock;
+    updateOne: jest.Mock;
+  };
+  let notifications: { notify: jest.Mock; notifyInBackground: jest.Mock };
   let session: { withTransaction: jest.Mock; endSession: jest.Mock };
 
   beforeEach(async () => {
@@ -119,7 +165,24 @@ describe('TransportService', () => {
       findById: jest.fn(),
     };
     farmerProfileModel = { find: jest.fn(), findOne: jest.fn() };
-    shipmentModel = { create: jest.fn(), find: jest.fn(), findById: jest.fn() };
+    shipmentModel = {
+      create: jest.fn(),
+      find: jest.fn(),
+      findById: jest.fn(),
+      findOne: jest.fn(() => chain(null)),
+      exists: jest.fn(() => transactionQuery(null)),
+      distinct: jest.fn(() => chain([])),
+    };
+    transporterProfileModel = {
+      find: jest.fn(),
+      findOne: jest.fn(() => chain(makeTransporter())),
+      findOneAndUpdate: jest.fn(() => transactionQuery(makeTransporter())),
+      updateOne: jest.fn(() => chain({ matchedCount: 1 })),
+    };
+    notifications = {
+      notify: jest.fn(() => Promise.resolve()),
+      notifyInBackground: jest.fn(),
+    };
     blockchainModel = { create: jest.fn() };
     session = {
       withTransaction: jest.fn(async (callback: () => Promise<unknown>) =>
@@ -145,35 +208,217 @@ describe('TransportService', () => {
           provide: getConnectionToken(),
           useValue: { startSession: jest.fn().mockResolvedValue(session) },
         },
+        {
+          provide: getModelToken(TransporterProfile.name),
+          useValue: transporterProfileModel,
+        },
+        {
+          provide: SystemConfigService,
+          useValue: {
+            getDeliverySettings: jest
+              .fn<() => Promise<DeliverySettings>>()
+              .mockResolvedValue(SystemConfigService.defaultDeliverySettings),
+          },
+        },
+        { provide: NotificationService, useValue: notifications },
       ],
     }).compile();
 
     service = moduleRef.get(TransportService);
   });
 
-  it('returns only paid unclaimed orders with a complete farm location', async () => {
-    const claimableOrder = makeOrder();
-    const missingLocationOrder = makeOrder({
-      _id: new Types.ObjectId(),
-      id: '66a2fe77bb77795516febc54',
-      farmerId: new Types.ObjectId(),
-    });
-    orderModel.find.mockReturnValue(
-      query([claimableOrder, missingLocationOrder]),
-    );
-    farmerProfileModel.find.mockReturnValue(query([makeFarmProfile()]));
+  describe('delivery offers', () => {
+    it('lists nearby paid orders with the fixed fee and an approximate drop-off', async () => {
+      const order = makeOrder({
+        pickupLocation: FARM_PIN,
+        deliveryFee: 1270,
+        deliveryDistanceKm: 44.6,
+        shippingAddress: {
+          street: '21 Market Road',
+          city: 'Lahore',
+          province: 'Punjab',
+          lat: 31.520412,
+          lng: 74.358719,
+        },
+      });
+      orderModel.find.mockReturnValue(chain([order]));
+      farmerProfileModel.find.mockReturnValue(
+        chain([makeFarmProfile({ farmName: 'Green Farm' })]),
+      );
 
-    await expect(service.findAvailable()).resolves.toEqual([
-      {
-        orderId,
-        pickupCity: 'Faisalabad',
-        pickupProvince: 'Punjab',
-        deliveryCity: 'Lahore',
-        deliveryProvince: 'Punjab',
-        itemCount: 2,
-        createdAt: '2026-08-11T00:00:00.000Z',
-      },
-    ]);
+      const [offer] = await service.findAvailable(transporterId);
+
+      expect(offer).toEqual(
+        expect.objectContaining({
+          orderId,
+          deliveryFee: 1270,
+          deliveryDistanceKm: 44.6,
+          farmName: 'Green Farm',
+          pickup: {
+            lat: 31.42,
+            lng: 73.08,
+            city: 'Faisalabad',
+            province: 'Punjab',
+          },
+          dropoffArea: {
+            lat: 31.52,
+            lng: 74.36,
+            city: 'Lahore',
+            province: 'Punjab',
+          },
+        }),
+      );
+      expect(offer.distanceToPickupKm).toBeGreaterThan(3);
+      expect(offer.distanceToPickupKm).toBeLessThan(6);
+      expect(JSON.stringify(offer)).not.toContain('21 Market Road');
+      const filter = orderModel.find.mock.calls[0][0] as GeoFilter;
+      expect(filter.declinedBy).toEqual({
+        $ne: new Types.ObjectId(transporterId),
+      });
+      expect(filter.pickupLocation.$nearSphere.$maxDistance).toBe(25_000);
+    });
+
+    it.each([
+      ['offline', { isAvailable: false }],
+      [
+        'with a stale location',
+        { lastLocationAt: new Date(Date.now() - 2 * 60 * 60_000) },
+      ],
+    ])('offers nothing while %s', async (_label, overrides) => {
+      transporterProfileModel.findOne.mockReturnValue(
+        chain(makeTransporter(overrides)),
+      );
+      await expect(service.findAvailable(transporterId)).resolves.toEqual([]);
+      expect(orderModel.find).not.toHaveBeenCalled();
+    });
+
+    it('offers nothing during a delivery in progress', async () => {
+      shipmentModel.findOne.mockReturnValue(
+        chain({ _id: new Types.ObjectId() }),
+      );
+      await expect(service.findAvailable(transporterId)).resolves.toEqual([]);
+    });
+
+    it('records a decline so the offer is hidden for that transporter', async () => {
+      const updateOne = jest.fn(() => chain({ matchedCount: 1 }));
+      (orderModel as Record<string, jest.Mock>).updateOne = updateOne;
+      await service.decline(orderId, transporterId);
+      expect(updateOne).toHaveBeenCalledWith(
+        { _id: new Types.ObjectId(orderId), status: OrderStatus.Paid },
+        { $addToSet: { declinedBy: new Types.ObjectId(transporterId) } },
+      );
+    });
+
+    it('pings nearby available transporters except busy ones', async () => {
+      const busyId = new Types.ObjectId();
+      const freeId = new Types.ObjectId();
+      orderModel.findById.mockReturnValue(
+        query(
+          makeOrder({
+            pickupLocation: FARM_PIN,
+            deliveryFee: 1270,
+            deliveryDistanceKm: 44.6,
+            declinedBy: [],
+          }),
+        ),
+      );
+      transporterProfileModel.find.mockReturnValue(
+        chain([{ userId: busyId }, { userId: freeId }]),
+      );
+      shipmentModel.distinct.mockReturnValue(chain([busyId]));
+      farmerProfileModel.findOne.mockReturnValue(chain(makeFarmProfile()));
+
+      await expect(service.dispatch(orderId)).resolves.toBe(1);
+      expect(notifications.notify).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userIds: [freeId],
+          type: NotificationType.DeliveryOffer,
+          title: 'New delivery · Rs 1,270',
+        }),
+      );
+      const filter = transporterProfileModel.find.mock.calls[0][0] as GeoFilter;
+      expect(filter.isAvailable).toBe(true);
+      expect(filter.lastLocation.$nearSphere.$geometry).toEqual(FARM_PIN);
+    });
+
+    it('does not dispatch an order that is already claimed', async () => {
+      orderModel.findById.mockReturnValue(
+        query(
+          makeOrder({
+            pickupLocation: FARM_PIN,
+            shipmentId: new Types.ObjectId(),
+          }),
+        ),
+      );
+      await expect(service.dispatch(orderId)).resolves.toBe(0);
+      expect(notifications.notify).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('accepting an offer', () => {
+    it('refuses while another delivery is in progress', async () => {
+      shipmentModel.exists.mockReturnValue(
+        transactionQuery({ _id: new Types.ObjectId() }),
+      );
+      await expect(service.claim(orderId, transporterId)).rejects.toThrow(
+        'Finish your current delivery',
+      );
+      expect(shipmentModel.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses an order outside the dispatch radius', async () => {
+      transporterProfileModel.findOneAndUpdate.mockReturnValue(
+        transactionQuery(makeTransporter({ lastLocation: FAR_TRANSPORTER })),
+      );
+      orderModel.findOne.mockReturnValue(
+        transactionQuery(makeOrder({ pickupLocation: FARM_PIN })),
+      );
+      await expect(service.claim(orderId, transporterId)).rejects.toThrow(
+        'outside your area',
+      );
+    });
+
+    it('snapshots the fee and both pins onto the shipment and notifies everyone', async () => {
+      const order = makeOrder({
+        pickupLocation: FARM_PIN,
+        deliveryFee: 1270,
+        shippingAddress: {
+          street: '21 Market Road',
+          city: 'Lahore',
+          province: 'Punjab',
+          lat: 31.52,
+          lng: 74.35,
+        },
+      });
+      order.save.mockResolvedValue(order);
+      orderModel.findOne.mockReturnValue(transactionQuery(order));
+      orderModel.findOneAndUpdate.mockReturnValue(transactionQuery(order));
+      farmerProfileModel.findOne.mockReturnValue(
+        transactionQuery(makeFarmProfile()),
+      );
+      shipmentModel.create.mockResolvedValue([makeShipment()]);
+      blockchainModel.create.mockResolvedValue([{ _id: new Types.ObjectId() }]);
+
+      await service.claim(orderId, transporterId);
+
+      expect(shipmentModel.create).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({
+            deliveryFee: 1270,
+            pickupAddress: expect.objectContaining({ lat: 31.42, lng: 73.08 }),
+            deliveryAddress: expect.objectContaining({
+              lat: 31.52,
+              lng: 74.35,
+            }),
+          }),
+        ],
+        { session },
+      );
+      const notified = notifications.notifyInBackground.mock.calls.map(
+        ([input]) => (input as { userIds: unknown[] }).userIds.map(String),
+      );
+      expect(notified).toEqual([[buyerId, farmerId], [transporterId]]);
+    });
   });
 
   it('claims a paid order by creating one assigned shipment and supply-chain outbox event', async () => {
@@ -302,7 +547,7 @@ describe('TransportService', () => {
     const order = makeOrder();
     const shipment = makeShipment();
     orderModel.find.mockReturnValue(query([order]));
-    shipmentModel.find.mockReturnValue(query([shipment]));
+    shipmentModel.find.mockReturnValue(chain([shipment]));
 
     await expect(
       service.findAll({

@@ -14,7 +14,12 @@ import {
   swaggerConfig,
   validationConfig,
 } from './config';
-import { DatabaseModule, FirebaseModule, RedisModule } from './infrastructure';
+import {
+  DatabaseModule,
+  FirebaseModule,
+  RedisModule,
+  StorageModule,
+} from './infrastructure';
 import { AdminModule } from './modules/admin/admin.module';
 import { AiModule } from './modules/ai/ai.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -123,7 +128,10 @@ const featureModules = [
         WEB_APP_ORIGIN: Joi.string().optional(),
         // Public origin encoded in product QR codes (defaults to WEB_APP_ORIGIN).
         PUBLIC_TRACE_ORIGIN: Joi.string().uri().allow('').optional(),
-        WEB_SESSION_TTL_SECONDS: Joi.number().integer().min(300).default(86_400),
+        WEB_SESSION_TTL_SECONDS: Joi.number()
+          .integer()
+          .min(300)
+          .default(86_400),
         WEB_SESSION_COOKIE_NAME: Joi.string().default('f2f_session'),
         WEB_SESSION_COOKIE_SECURE: Joi.boolean().default(true),
         // Per-IP request budget per minute for every route (tighter
@@ -136,6 +144,13 @@ const featureModules = [
         AI_SERVICE_URL: Joi.string().uri().allow('').optional(),
         AI_SERVICE_TOKEN: Joi.string().allow('').optional(),
         AI_SERVICE_TIMEOUT_MS: Joi.number().integer().min(1000).default(20_000),
+        // Uploads: Cloudinary when set (cloudinary://key:secret@cloud),
+        // otherwise local disk under UPLOAD_DIR (development only).
+        CLOUDINARY_URL: Joi.string()
+          .pattern(/^cloudinary:\/\//)
+          .allow('')
+          .optional(),
+        UPLOAD_DIR: Joi.string().allow('').optional(),
       }),
       validationOptions: {
         allowUnknown: true,
@@ -156,7 +171,13 @@ const featureModules = [
       }),
     }),
     ...(shouldLoadInfrastructure
-      ? [DatabaseModule, RedisModule, FirebaseModule, ...featureModules]
+      ? [
+          DatabaseModule,
+          RedisModule,
+          FirebaseModule,
+          StorageModule,
+          ...featureModules,
+        ]
       : []),
   ],
   controllers: [AppController],

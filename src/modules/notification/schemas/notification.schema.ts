@@ -10,6 +10,11 @@ export enum NotificationType {
   DeliveryUpdate = 'delivery_update',
   LoanUpdate = 'loan_update',
   AdminAction = 'admin_action',
+  /**
+   * A paid order near an available transporter, offered at a fixed delivery
+   * fee (owner-approved addition to master context 5.15).
+   */
+  DeliveryOffer = 'delivery_offer',
 }
 
 /**
@@ -62,3 +67,5 @@ export const NotificationSchema = SchemaFactory.createForClass(Notification);
 
 // Critical index (master context 5.18).
 NotificationSchema.index({ userId: 1, isRead: 1 });
+// Newest-first inbox listing.
+NotificationSchema.index({ userId: 1, createdAt: -1 });

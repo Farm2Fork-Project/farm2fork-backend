@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { AdminModule } from '../admin/admin.module';
 import { AuthModule } from '../auth/auth.module';
 import { BlockchainModule } from '../blockchain/blockchain.module';
 import { OrderModule } from '../order/order.module';
@@ -8,8 +9,8 @@ import { Shipment, ShipmentSchema } from './schemas/shipment.schema';
 import { TransportService } from './transport.service';
 
 /**
- * TransportModule (EP-07). Registers the shipments data layer. Shipment
- * assignment and delivery tracking arrive in Sprint 6.
+ * TransportModule (EP-07): proximity dispatch of paid orders to nearby
+ * transporters, delivery acceptance and status tracking.
  */
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { TransportService } from './transport.service';
       { name: Shipment.name, schema: ShipmentSchema },
     ]),
     AuthModule,
+    AdminModule,
     OrderModule,
     BlockchainModule,
   ],

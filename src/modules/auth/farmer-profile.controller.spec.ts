@@ -21,7 +21,7 @@ async function errorsFor<T extends object>(cls: new () => T, body: object) {
 }
 
 describe('farm location', () => {
-  it('onboarding requires a complete farm location (street, city, province)', async () => {
+  it('onboarding requires a complete farm location (street, city, province, pin)', async () => {
     const base = {
       idToken: 't',
       farmName: 'Green Valley',
@@ -39,11 +39,17 @@ describe('farm location', () => {
     );
     expect(
       partial.flatMap((e) => e.children?.map((c) => c.property) ?? []),
-    ).toEqual(expect.arrayContaining(['city', 'province']));
+    ).toEqual(expect.arrayContaining(['city', 'province', 'lat', 'lng']));
     expect(
       await errorsFor(FirebaseOnboardFarmerDto, {
         ...base,
-        farmLocation: { address: 'Chak 5', city: 'Multan', province: 'Punjab' },
+        farmLocation: {
+          address: 'Chak 5',
+          city: 'Multan',
+          province: 'Punjab',
+          lat: 30.1575,
+          lng: 71.5249,
+        },
       }),
     ).toEqual([]);
   });
@@ -54,8 +60,22 @@ describe('farm location', () => {
         address: 'Chak 5',
         city: 'Multan',
         province: 'Atlantis',
+        lat: 30.1575,
+        lng: 71.5249,
       }),
     ).toEqual(['province']);
+  });
+
+  it('rejects a pin outside Pakistan or with swapped coordinates', async () => {
+    const base = { address: 'Chak 5', city: 'Multan', province: 'Punjab' };
+    // London.
+    expect(
+      await errorsFor(FarmLocationDto, { ...base, lat: 51.5, lng: -0.12 }),
+    ).toEqual(['lat', 'lng']);
+    // Multan with lat/lng swapped.
+    expect(
+      await errorsFor(FarmLocationDto, { ...base, lat: 71.5249, lng: 30.1575 }),
+    ).toEqual(['lat', 'lng']);
   });
 
   it('reports incomplete locations and saves a trimmed complete one', async () => {
@@ -69,6 +89,8 @@ describe('farm location', () => {
             address: 'Chak 5',
             city: 'Multan',
             province: 'Punjab',
+            lat: 30.1575,
+            lng: 71.5249,
           },
         }),
       ),
@@ -85,13 +107,23 @@ describe('farm location', () => {
       address: '  Chak 5 ',
       city: ' Multan ',
       province: 'Punjab',
+      lat: 30.1575,
+      lng: 71.5249,
     });
     expect(model.findOneAndUpdate.mock.calls[0][1]).toEqual({
       $set: {
-        farmLocation: { address: 'Chak 5', city: 'Multan', province: 'Punjab' },
+        farmLocation: {
+          address: 'Chak 5',
+          city: 'Multan',
+          province: 'Punjab',
+          lat: 30.1575,
+          lng: 71.5249,
+        },
       },
     });
-    expect(saved.complete).toBe(true);
+    expect(saved).toEqual(
+      expect.objectContaining({ lat: 30.1575, lng: 71.5249, complete: true }),
+    );
   });
 
   it('404s for a farmer without a profile', async () => {

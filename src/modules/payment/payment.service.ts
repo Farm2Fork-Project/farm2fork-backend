@@ -23,7 +23,14 @@ import {
   ProductDocument,
   ProductStatus,
 } from '../marketplace/schemas/product.schema';
-import { Order, OrderDocument, OrderStatus } from '../order/schemas/order.schema';
+import { NotificationService } from '../notification/notification.service';
+import { NotificationType } from '../notification/schemas/notification.schema';
+import {
+  Order,
+  OrderDocument,
+  OrderStatus,
+} from '../order/schemas/order.schema';
+import { TransportService } from '../transport/transport.service';
 import {
   Payment,
   PaymentDocument,
@@ -60,6 +67,8 @@ export class PaymentService {
     @InjectConnection()
     private readonly connection: Connection,
     private readonly config: ConfigService,
+    private readonly notifications: NotificationService,
+    private readonly transport: TransportService,
   ) {}
 
   async initiate(
@@ -115,8 +124,10 @@ export class PaymentService {
     }
 
     const session = await this.connection.startSession();
+    let settledOrder: OrderDocument | undefined;
+    let response: PaymentResponseDto;
     try {
-      return await session.withTransaction(async () => {
+      response = await session.withTransaction(async () => {
         const payment = await this.paymentModel
           .findOne({ _id: id, buyerId: new Types.ObjectId(buyerId) })
           .session(session)
@@ -196,11 +207,40 @@ export class PaymentService {
         order.status = OrderStatus.Paid;
         order.paymentId = payment._id;
         await Promise.all([payment.save({ session }), order.save({ session })]);
+        settledOrder = order;
         return this.toResponse(payment);
       });
     } finally {
       await session.endSession();
     }
+    if (settledOrder) this.afterPaymentSuccess(settledOrder);
+    return response;
+  }
+
+  /**
+   * Side effects of a settled payment, run after the transaction commits:
+   * notify both parties (master context 6.5) and offer the delivery to
+   * nearby transporters. Never fails the payment.
+   */
+  private afterPaymentSuccess(order: OrderDocument): void {
+    const label = `#${order._id.toHexString().slice(-6).toUpperCase()}`;
+    this.notifications.notifyInBackground({
+      userIds: [order.buyerId],
+      type: NotificationType.PaymentConfirmed,
+      title: 'Payment confirmed',
+      message: `We received Rs ${order.grandTotal.toLocaleString('en-PK')} for order ${label}. We're finding a transporter near the farm.`,
+      relatedEntityId: order._id,
+      relatedEntityModel: 'Order',
+    });
+    this.notifications.notifyInBackground({
+      userIds: [order.farmerId],
+      type: NotificationType.PaymentConfirmed,
+      title: 'Order paid - prepare for pickup',
+      message: `Order ${label} is paid. A nearby transporter will be assigned to collect it.`,
+      relatedEntityId: order._id,
+      relatedEntityModel: 'Order',
+    });
+    this.transport.dispatchInBackground(order._id);
   }
 
   async findAll(
@@ -229,10 +269,7 @@ export class PaymentService {
     };
   }
 
-  async findOne(
-    id: string,
-    user: RequestUser,
-  ): Promise<PaymentResponseDto> {
+  async findOne(id: string, user: RequestUser): Promise<PaymentResponseDto> {
     if (!Types.ObjectId.isValid(id)) {
       throw new NotFoundException('Payment not found');
     }

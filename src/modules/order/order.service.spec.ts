@@ -9,6 +9,8 @@ import { Types } from 'mongoose';
 import { RequestUser } from '../../common/guards/roles.guard';
 import { UserRole } from '../../common/enums/user-role.enum';
 import { SystemConfigService } from '../admin/services/system-config.service';
+import { FarmerProfile } from '../auth/schemas/farmer-profile.schema';
+import { NotificationService } from '../notification/notification.service';
 import { Product, ProductStatus } from '../marketplace/schemas/product.schema';
 import { OrderService } from './order.service';
 import { Order, OrderStatus } from './schemas/order.schema';
@@ -43,7 +45,12 @@ const ADDRESS = {
   city: 'Lahore',
   province: 'Punjab',
   zip: '54000',
+  lat: 31,
+  lng: 70,
 };
+
+// Exactly one degree of latitude south of the drop-off: 111.2 km apart.
+const FARM_PIN = { lat: 30, lng: 70 };
 
 describe('OrderService', () => {
   let service: OrderService;
@@ -54,7 +61,26 @@ describe('OrderService', () => {
     countDocuments: jest.Mock;
   };
   let productModel: { find: jest.Mock };
-  let configService: { getPlatformFeePercent: jest.Mock };
+  let configService: {
+    getPlatformFeePercent: jest.Mock;
+    getDeliverySettings: jest.Mock;
+  };
+  let farmerProfileModel: { findOne: jest.Mock };
+  let notifications: { notifyInBackground: jest.Mock };
+
+  function farmPinIs(pin: { lat?: number; lng?: number } | null) {
+    farmerProfileModel.findOne.mockReturnValue({
+      select: () => ({
+        lean: () => ({
+          exec: jest
+            .fn()
+            .mockResolvedValue(
+              pin ? { farmLocation: { city: 'Multan', ...pin } } : null,
+            ),
+        }),
+      }),
+    });
+  }
 
   function findProductsReturns(products: unknown[]) {
     productModel.find.mockReturnValue({
@@ -70,7 +96,18 @@ describe('OrderService', () => {
       countDocuments: jest.fn(),
     };
     productModel = { find: jest.fn() };
-    configService = { getPlatformFeePercent: jest.fn().mockResolvedValue(5) };
+    configService = {
+      getPlatformFeePercent: jest.fn().mockResolvedValue(5),
+      getDeliverySettings: jest.fn().mockResolvedValue({
+        ...SystemConfigService.defaultDeliverySettings,
+        baseFee: 100,
+        feePerKm: 10,
+        roadFactor: 1,
+      }),
+    };
+    farmerProfileModel = { findOne: jest.fn() };
+    farmPinIs(FARM_PIN);
+    notifications = { notifyInBackground: jest.fn() };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -78,6 +115,11 @@ describe('OrderService', () => {
         { provide: getModelToken(Order.name), useValue: orderModel },
         { provide: getModelToken(Product.name), useValue: productModel },
         { provide: SystemConfigService, useValue: configService },
+        {
+          provide: getModelToken(FarmerProfile.name),
+          useValue: farmerProfileModel,
+        },
+        { provide: NotificationService, useValue: notifications },
       ],
     }).compile();
 
@@ -86,6 +128,7 @@ describe('OrderService', () => {
     orderModel.create.mockImplementation((doc: Record<string, unknown>) =>
       Promise.resolve({
         ...doc,
+        _id: new Types.ObjectId('6a2fe77bb77795516febc500'),
         id: '6a2fe77bb77795516febc500',
         createdAt: new Date('2026-06-15T12:00:00.000Z'),
         updatedAt: new Date('2026-06-15T12:00:00.000Z'),
@@ -168,7 +211,63 @@ describe('OrderService', () => {
       expect(result.totalAmount).toBe(1000);
       expect(result.platformFeePercent).toBe(8);
       expect(result.platformFeeAmount).toBe(80);
-      expect(result.grandTotal).toBe(1080);
+      // 111.2 km x Rs 10 + Rs 100 base, rounded up to Rs 10.
+      expect(result.deliveryFee).toBe(1220);
+      expect(result.deliveryDistanceKm).toBe(111.2);
+      expect(result.grandTotal).toBe(1000 + 80 + 1220);
+    });
+  });
+
+  describe('delivery fee', () => {
+    it('freezes the fee and the farm pin on the order and notifies both parties', async () => {
+      findProductsReturns([
+        fakeProduct({ id: PROD_1, farmerId: FARMER_A, price: 100 }),
+      ]);
+      await service.create(BUYER, {
+        items: [{ productId: PROD_1, quantity: 1 }],
+        shippingAddress: ADDRESS,
+      });
+      const saved = orderModel.create.mock.calls[0][0];
+      expect(saved.deliveryFee).toBe(1220);
+      expect(saved.pickupLocation).toEqual({
+        type: 'Point',
+        coordinates: [70, 30],
+      });
+      const recipients = notifications.notifyInBackground.mock.calls.map(
+        ([input]: [{ userIds: unknown[] }]) => String(input.userIds[0]),
+      );
+      expect(recipients).toEqual([FARMER_A, BUYER]);
+    });
+
+    it('quotes exactly what create would charge, without saving', async () => {
+      findProductsReturns([
+        fakeProduct({ id: PROD_1, farmerId: FARMER_A, price: 100 }),
+      ]);
+      const quote = await service.quote({
+        items: [{ productId: PROD_1, quantity: 10 }],
+        shippingAddress: ADDRESS,
+      });
+      expect(quote).toEqual({
+        totalAmount: 1000,
+        platformFeePercent: 5,
+        platformFeeAmount: 50,
+        deliveryFee: 1220,
+        deliveryDistanceKm: 111.2,
+        grandTotal: 2270,
+      });
+      expect(orderModel.create).not.toHaveBeenCalled();
+    });
+
+    it("rejects checkout when the farm hasn't pinned its location", async () => {
+      farmPinIs({});
+      findProductsReturns([fakeProduct({ id: PROD_1, farmerId: FARMER_A })]);
+      await expect(
+        service.create(BUYER, {
+          items: [{ productId: PROD_1, quantity: 1 }],
+          shippingAddress: ADDRESS,
+        }),
+      ).rejects.toThrow("hasn't set its pickup location");
+      expect(orderModel.create).not.toHaveBeenCalled();
     });
   });
 

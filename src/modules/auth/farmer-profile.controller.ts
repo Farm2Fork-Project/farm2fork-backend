@@ -21,6 +21,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
 import type { RequestUser } from '../../common/guards/roles.guard';
+import { hasCoordinates } from '../../common/geo/geo';
 import { FarmLocationDto } from './dto/register.dto';
 import {
   FarmerProfile,
@@ -37,9 +38,15 @@ export class FarmLocationResponseDto {
   @ApiPropertyOptional()
   province?: string;
 
+  @ApiPropertyOptional()
+  lat?: number;
+
+  @ApiPropertyOptional()
+  lng?: number;
+
   @ApiProperty({
     description:
-      'False when address, city or province is missing - transporters cannot pick up from this farm until it is completed.',
+      'False when address, city, province or the map pin is missing - buyers cannot check out and transporters cannot be matched until it is completed.',
   })
   complete!: boolean;
 }
@@ -69,8 +76,8 @@ export class FarmerProfileService {
       address: location.address.trim(),
       city: location.city.trim(),
       province: location.province,
-      ...(location.lat === undefined ? {} : { lat: location.lat }),
-      ...(location.lng === undefined ? {} : { lng: location.lng }),
+      lat: location.lat,
+      lng: location.lng,
     };
     const updated = await this.farmerProfileModel
       .findOneAndUpdate(
@@ -92,11 +99,13 @@ function toResponse(
   const address = location?.address?.trim() || undefined;
   const city = location?.city?.trim() || undefined;
   const province = location?.province?.trim() || undefined;
+  const pinned = hasCoordinates(location);
   return {
     address,
     city,
     province,
-    complete: Boolean(address && city && province),
+    ...(pinned ? { lat: location.lat, lng: location.lng } : {}),
+    complete: Boolean(address && city && province && pinned),
   };
 }
 
@@ -126,7 +135,7 @@ export class FarmerProfileController {
   @ApiOperation({
     summary: "Set the signed-in farmer's pickup location",
     description:
-      'Farmer only. Street/village, city and province are required so transporters can collect orders.',
+      'Farmer only. Street/village, city, province and the map pin are required: delivery fees are priced from the pin and transporters are matched to it.',
   })
   @ApiOkResponse({ type: FarmLocationResponseDto })
   @ApiErrorResponses(400, 401, 403, 404)
