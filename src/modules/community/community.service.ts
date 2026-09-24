@@ -67,8 +67,13 @@ export class CommunityService {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const filter: FilterQuery<PostDocument> = { status: PostStatus.Published };
-    if (query.tag) filter.tags = query.tag;
-    if (query.authorId) filter.authorId = new Types.ObjectId(query.authorId);
+    if (query.tag) filter.tags = { $eq: query.tag };
+    if (query.authorId) {
+      if (!Types.ObjectId.isValid(query.authorId)) {
+        throw new BadRequestException('Invalid authorId');
+      }
+      filter.authorId = { $eq: new Types.ObjectId(query.authorId) };
+    }
 
     const [posts, total] = await Promise.all([
       this.postModel
