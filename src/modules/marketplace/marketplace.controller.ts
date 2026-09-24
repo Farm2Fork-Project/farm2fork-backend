@@ -19,6 +19,7 @@ import {
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ApiErrorResponses } from '../../common/decorators/api-error-responses.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { QrRenderRateLimit } from '../../common/rate-limit/rate-limits';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
 import type { RequestUser } from '../../common/guards/roles.guard';
@@ -98,6 +99,7 @@ export class MarketplaceController {
 
   @Get(':id/qr')
   @Public()
+  @QrRenderRateLimit()
   @ApiOperation({
     summary: "Get a product's traceability QR code",
     description: 'Returns the trace URL and a rendered QR image data URI.',

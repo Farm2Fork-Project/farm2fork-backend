@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import * as Joi from 'joi';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -125,12 +126,34 @@ const featureModules = [
         WEB_SESSION_TTL_SECONDS: Joi.number().integer().min(300).default(86_400),
         WEB_SESSION_COOKIE_NAME: Joi.string().default('f2f_session'),
         WEB_SESSION_COOKIE_SECURE: Joi.boolean().default(true),
+        // Per-IP request budget per minute for every route (tighter
+        // per-route budgets live in common/rate-limit).
+        RATE_LIMIT_PER_MINUTE: Joi.number().integer().min(1).default(300),
+        // Express "trust proxy" (e.g. 1 or "loopback") so limits key on the
+        // real client IP behind nginx instead of the proxy's address.
+        TRUST_PROXY: Joi.string().optional(),
+        // FastAPI AI service (farm2fork-ai).
+        AI_SERVICE_URL: Joi.string().uri().optional(),
+        AI_SERVICE_TOKEN: Joi.string().optional(),
+        AI_SERVICE_TIMEOUT_MS: Joi.number().integer().min(1000).default(20_000),
       }),
       validationOptions: {
         allowUnknown: true,
         abortEarly: false,
       },
       load: [appConfig, blockchainConfig, swaggerConfig, validationConfig],
+    }),
+    ThrottlerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        throttlers: [
+          {
+            name: 'default',
+            ttl: 60_000,
+            limit: Number(config.get('RATE_LIMIT_PER_MINUTE') ?? 300),
+          },
+        ],
+      }),
     }),
     ...(shouldLoadInfrastructure
       ? [DatabaseModule, RedisModule, FirebaseModule, ...featureModules]
@@ -139,8 +162,10 @@ const featureModules = [
   controllers: [AppController],
   providers: [
     AppService,
-    // Guard order matters. CSRF/origin runs first to reject unsafe browser
-    // cookie requests, then JWT authenticates (Bearer), then roles authorize.
+    // Guard order matters. Rate limiting runs first so floods are rejected
+    // before any auth work, then CSRF/origin rejects unsafe browser cookie
+    // requests, then JWT authenticates (Bearer), then roles authorize.
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
