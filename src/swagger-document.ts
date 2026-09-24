@@ -45,6 +45,7 @@ export function createSwaggerDocument(
       'Shipments',
       'Shipment discovery, claims, tracking and delivery updates',
     )
+    .addTag('AI', 'Crop quality grading and price suggestions for farmers')
     .addTag(
       'Traceability',
       'Public product provenance backed by the Hyperledger Fabric ledger',
