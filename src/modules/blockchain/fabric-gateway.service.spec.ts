@@ -42,39 +42,42 @@ describe('FabricGatewayService', () => {
     await service.onModuleInit();
   });
 
-  it('maps a payment outbox record to immutable ledger arguments', async () => {
-    const paidAt = new Date('2026-08-11T12:00:00.000Z');
-    const record = paymentRecord({ paidAt });
-    const submitted = {
-      getStatus: jest.fn().mockResolvedValue({
-        successful: true,
-        transactionId: 'fabric-payment-001',
-        blockNumber: 18n,
-      }),
-    };
-    contract.submitAsync.mockResolvedValue(submitted);
+  it.each(['stripe', 'jazzcash', 'safepay'])(
+    'maps a %s payment outbox record to immutable ledger arguments',
+    async (gateway) => {
+      const paidAt = new Date('2026-08-11T12:00:00.000Z');
+      const record = paymentRecord({ paidAt, gateway });
+      const submitted = {
+        getStatus: jest.fn().mockResolvedValue({
+          successful: true,
+          transactionId: 'fabric-payment-001',
+          blockNumber: 18n,
+        }),
+      };
+      contract.submitAsync.mockResolvedValue(submitted);
 
-    await expect(service.submit(record)).resolves.toEqual({
-      txHash: 'fabric-payment-001',
-      blockNumber: 18,
-      channelName: 'farm2forkchannel',
-    });
+      await expect(service.submit(record)).resolves.toEqual({
+        txHash: 'fabric-payment-001',
+        blockNumber: 18,
+        channelName: 'farm2forkchannel',
+      });
 
-    expect(contract.submitAsync).toHaveBeenCalledWith('RecordPayment', {
-      arguments: [
-        record._id.toHexString(),
-        record.referenceId.toHexString(),
-        record.payload.payment?.orderId?.toHexString(),
-        record.payload.payment?.buyerId?.toHexString(),
-        record.payload.payment?.farmerId?.toHexString(),
-        '1500',
-        'PKR',
-        'stripe',
-        paidAt.toISOString(),
-      ],
-      endorsingOrganizations: ['Farm2ForkMSP'],
-    });
-  });
+      expect(contract.submitAsync).toHaveBeenCalledWith('RecordPayment', {
+        arguments: [
+          record._id.toHexString(),
+          record.referenceId.toHexString(),
+          record.payload.payment?.orderId?.toHexString(),
+          record.payload.payment?.buyerId?.toHexString(),
+          record.payload.payment?.farmerId?.toHexString(),
+          '1500',
+          'PKR',
+          gateway,
+          paidAt.toISOString(),
+        ],
+        endorsingOrganizations: ['Farm2ForkMSP'],
+      });
+    },
+  );
 
   it('maps a shipment product event to immutable ledger arguments', async () => {
     const timestamp = new Date('2026-08-11T12:05:00.000Z');
@@ -255,7 +258,7 @@ describe('FabricGatewayService', () => {
 });
 
 function paymentRecord(
-  overrides: Partial<{ paidAt: Date }> = {},
+  overrides: Partial<{ paidAt: Date; gateway: string }> = {},
 ): BlockchainTransactionDocument {
   return {
     _id: new Types.ObjectId(),
@@ -270,7 +273,7 @@ function paymentRecord(
         farmerId: new Types.ObjectId(),
         amount: 1500,
         currency: 'PKR',
-        gateway: 'stripe',
+        gateway: overrides.gateway ?? 'stripe',
         paidAt: overrides.paidAt ?? new Date('2026-08-11T12:00:00.000Z'),
       },
       supplyChain: null,
