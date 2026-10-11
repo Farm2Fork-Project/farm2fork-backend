@@ -109,6 +109,7 @@ describe('PaymentService transaction integration', () => {
   });
 
   beforeEach(async () => {
+    transport.dispatchInBackground.mockClear();
     await Promise.all([
       paymentModel.deleteMany({}),
       orderModel.deleteMany({}),
