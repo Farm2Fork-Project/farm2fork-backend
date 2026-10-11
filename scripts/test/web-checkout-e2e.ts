@@ -1,6 +1,6 @@
 /** Real web components/repository -> Nest HTTP/JWT -> MongoDB transactions.
- * Safepay tracker/passport endpoints use local HTTP fixtures. Notification and
- * push delivery are stubbed; transport dispatch and ledger outbox persistence are real.
+ * Safepay tracker/passport endpoints use local HTTP fixtures. Notifications are persisted;
+ * push delivery needs a real device. Transport and ledger outbox persistence are real.
  * Firebase session acquisition and the hosted provider UI are outside this test.
  */
 import 'reflect-metadata';
@@ -33,6 +33,16 @@ import {
   FarmerProfile,
   FarmerProfileSchema,
 } from '../../src/modules/auth/schemas/farmer-profile.schema';
+import { FIREBASE_APP } from '../../src/infrastructure/firebase/firebase.constants';
+import { NotificationController } from '../../src/modules/notification/notification.controller';
+import {
+  Notification,
+  NotificationSchema,
+  NotificationType,
+} from '../../src/modules/notification/schemas/notification.schema';
+import { BlockchainOutboxWorker } from '../../src/modules/blockchain/blockchain-outbox.worker';
+import { FabricGatewayService } from '../../src/modules/blockchain/fabric-gateway.service';
+import { FabricGatewayRuntimeService } from '../../src/modules/blockchain/fabric-gateway.runtime';
 import { NotificationService } from '../../src/modules/notification/notification.service';
 import { TransportController } from '../../src/modules/transport/transport.controller';
 import {
@@ -74,6 +84,8 @@ import { SafepayClient } from '../../src/modules/payment/safepay/safepay.client'
 import {
   BlockchainTransaction,
   BlockchainTransactionSchema,
+  BlockchainTransactionDocument,
+  BlockchainTxStatus,
 } from '../../src/modules/blockchain/schemas/blockchain-transaction.schema';
 import {
   SystemConfig,
@@ -120,6 +132,7 @@ async function main() {
   });
   let moduleRef: TestingModule | undefined;
   let server: INestApplication | undefined;
+  let fabricRuntime: FabricGatewayRuntimeService | undefined;
   try {
     await new Promise<void>((done) => gateway.listen(0, '127.0.0.1', done));
     const gatewayUrl = `http://127.0.0.1:${(gateway.address() as AddressInfo).port}`;
@@ -132,6 +145,7 @@ async function main() {
           { name: TransporterProfile.name, schema: TransporterProfileSchema },
           { name: FarmerProfile.name, schema: FarmerProfileSchema },
           { name: User.name, schema: UserSchema },
+          { name: Notification.name, schema: NotificationSchema },
           { name: Order.name, schema: OrderSchema },
           { name: Payment.name, schema: PaymentSchema },
           {
@@ -147,18 +161,14 @@ async function main() {
         PaymentController,
         FarmerProfileController,
         TransportController,
+        NotificationController,
       ],
       providers: [
         FarmerProfileService,
         MarketplaceService,
         OrderService,
-        {
-          provide: NotificationService,
-          useValue: {
-            notify: () => Promise.resolve(),
-            notifyInBackground: () => undefined,
-          },
-        },
+        NotificationService,
+        { provide: FIREBASE_APP, useValue: null },
         TransportService,
         PaymentService,
         SafepayClient,
@@ -248,7 +258,13 @@ async function main() {
           vehicleNumber: `FIX-${index}`,
           licenseNumber: `fixture-${index}`,
           cnic: `352021234569${index}`,
-          isAvailable: false,
+          isAvailable: index === 1,
+          ...(index === 1
+            ? {
+                lastLocation: { type: 'Point', coordinates: [74.35, 31.52] },
+                lastLocationAt: new Date(),
+              }
+            : {}),
         })),
       );
     await Promise.all([
@@ -367,6 +383,224 @@ async function main() {
       )
         throw new Error('Unexpected delivery result');
     }
+    // Background notification persistence can finish after the HTTP response.
+    const notificationModel = moduleRef.get<Model<Notification>>(
+      getModelToken(Notification.name),
+    );
+    const expectedBuyer = delivery ? 12 : 4;
+    for (let attempt = 0; attempt < 50; attempt++) {
+      if (
+        (await notificationModel.countDocuments({ userId: buyer._id })) ===
+        expectedBuyer
+      )
+        break;
+      await new Promise<void>((done) => setTimeout(done, 100));
+    }
+    const requestAs = async (
+      authToken: string,
+      path: string,
+      method = 'GET',
+      body?: unknown,
+    ) => {
+      const response = await fetch(`${apiUrl}${path}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          'X-Farm2Fork-CSRF': '1',
+          'Content-Type': 'application/json',
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      return response;
+    };
+    const inboxResponse = await requestAs(
+      token(buyer),
+      '/notifications?limit=50',
+    );
+    const inbox = (await inboxResponse.json()) as {
+      total: number;
+      unread: number;
+      data: Array<{
+        id: string;
+        type: NotificationType;
+        relatedEntityId?: string;
+      }>;
+    };
+    if (
+      !inboxResponse.ok ||
+      inbox.total !== expectedBuyer ||
+      inbox.unread !== expectedBuyer ||
+      inbox.data.filter((n) => n.type === NotificationType.PaymentConfirmed)
+        .length !== 2 ||
+      (delivery &&
+        inbox.data.filter((n) => n.type === NotificationType.DeliveryUpdate)
+          .length !== 6)
+    ) {
+      throw new Error(
+        `Buyer notification persistence or replay deduplication failed: HTTP ${inboxResponse.status}, total ${inbox.total}, unread ${inbox.unread}`,
+      );
+    }
+    for (const farmer of farmers) {
+      const response = await requestAs(
+        token(farmer),
+        '/notifications?limit=50',
+      );
+      const page = (await response.json()) as { total: number };
+      if (!response.ok || page.total !== (delivery ? 6 : 2))
+        throw new Error('Farmer notification inbox mismatch');
+    }
+    const competitorNotices = await notificationModel
+      .find({
+        userId: transporters[1]._id,
+        type: NotificationType.DeliveryOffer,
+      })
+      .exec();
+    if (
+      competitorNotices.length !== 2 ||
+      new Set(competitorNotices.map((n) => String(n.relatedEntityId))).size !==
+        2
+    )
+      throw new Error(
+        'Delivery offer notification or payment replay deduplication failed',
+      );
+    if (
+      delivery &&
+      (await notificationModel.countDocuments({
+        userId: transporters[0]._id,
+        type: NotificationType.ShipmentAssigned,
+      })) !== 2
+    )
+      throw new Error('Transporter assignment notification mismatch');
+    console.log(
+      'PASS: farmer order/payment/delivery inboxes and transporter offer/assignment notifications',
+    );
+    const foreignRead = await requestAs(
+      token(otherBuyer),
+      `/notifications/${inbox.data[0].id}/read`,
+      'PATCH',
+    );
+    if (foreignRead.status !== 404)
+      throw new Error('Notification ownership check failed');
+    if (
+      !(
+        await requestAs(
+          token(buyer),
+          `/notifications/${inbox.data[0].id}/read`,
+          'PATCH',
+        )
+      ).ok ||
+      !(await requestAs(token(buyer), '/notifications/read-all', 'POST')).ok
+    )
+      throw new Error('Notification read update failed');
+    const unreadResponse = await requestAs(
+      token(buyer),
+      '/notifications/unread-count',
+    );
+    if (((await unreadResponse.json()) as { unread: number }).unread !== 0)
+      throw new Error('Notification unread count did not clear');
+    // A fixture token tests account binding only; it is never sent to FCM.
+    const fixtureToken = `fixture-${randomUUID()}`;
+    if (
+      (
+        await requestAs(token(buyer), '/notifications/device-token', 'PUT', {
+          token: fixtureToken,
+        })
+      ).status !== 204 ||
+      (
+        await requestAs(
+          token(otherBuyer),
+          '/notifications/device-token',
+          'PUT',
+          { token: fixtureToken },
+        )
+      ).status !== 204 ||
+      (await users.countDocuments({ fcmToken: fixtureToken })) !== 1
+    )
+      throw new Error('Device token account handover failed');
+    if (
+      (
+        await requestAs(
+          token(otherBuyer),
+          '/notifications/device-token',
+          'DELETE',
+        )
+      ).status !== 204 ||
+      (await users.countDocuments({ fcmToken: fixtureToken })) !== 0
+    )
+      throw new Error('Device token cleanup failed');
+    console.log(
+      `PASS: real notification inbox (${expectedBuyer} buyer records), ownership, read/unread and device-token handover`,
+    );
+
+    if (process.argv.includes('--fabric')) {
+      const crypto = resolve(
+        __dirname,
+        '../../../farm2fork-blockchain/network/organizations/peerOrganizations/farm2fork.com',
+      );
+      const fabricConfig = new ConfigService({
+        blockchain: {
+          enabled: true,
+          channelName: 'farm2forkchannel',
+          chaincodeName: 'farm2fork-chaincode',
+          mspId: 'Farm2ForkMSP',
+          peerEndpoint: process.env.FABRIC_PEER_ENDPOINT ?? 'localhost:7051',
+          peerHostAlias: 'peer0.farm2fork.com',
+          tlsRootCertPath: resolve(
+            crypto,
+            'peers/peer0.farm2fork.com/tls/ca.crt',
+          ),
+          identityCertPath: resolve(
+            crypto,
+            'users/Admin@farm2fork.com/msp/signcerts/Admin@farm2fork.com-cert.pem',
+          ),
+          identityKeyPath: resolve(
+            crypto,
+            'users/Admin@farm2fork.com/msp/keystore/priv_sk',
+          ),
+          leaseDurationMs: 30000,
+          retryBaseDelayMs: 100,
+        },
+      });
+      fabricRuntime = new FabricGatewayRuntimeService(fabricConfig);
+      const fabric = new FabricGatewayService(fabricConfig, fabricRuntime);
+      await fabric.onModuleInit();
+      const outbox = moduleRef.get<Model<BlockchainTransactionDocument>>(
+        getModelToken(BlockchainTransaction.name),
+      );
+      const worker = new BlockchainOutboxWorker(outbox, fabricConfig, fabric);
+      for (let attempt = 0; attempt < records.length * 4; attempt++) {
+        if (
+          (await outbox.countDocuments({ status: 'confirmed' })) ===
+          records.length
+        )
+          break;
+        if (!(await worker.processNext()))
+          await new Promise<void>((done) => setTimeout(done, 250));
+      }
+      const confirmed = await outbox.find().exec();
+      for (const record of confirmed) {
+        if (
+          record.status !== BlockchainTxStatus.Confirmed ||
+          !record.txHash ||
+          !record.blockNumber
+        ) {
+          throw new Error(
+            `Fabric outbox ${record.id} failed: ${record.lastErrorCode ?? record.status} ${record.lastErrorMessage ?? ''}`,
+          );
+        }
+        const ledger = await fabric.findByLedgerKey(record._id.toHexString());
+        if (
+          ledger?.referenceId !== String(record.referenceId) ||
+          ledger.txHash !== record.txHash
+        )
+          throw new Error('Fabric independent readback mismatch');
+      }
+      if (await worker.processNext())
+        throw new Error('Confirmed outbox was submitted again');
+      console.log(
+        `PASS: ${records.length} real Fabric commits and independent ledger readbacks; confirmed outbox replay is idle`,
+      );
+    }
     if (
       trackerRequests.length !== 4 ||
       trackerRequests.some(
@@ -385,6 +619,7 @@ async function main() {
       `PASS: ${mobile ? 'mobile' : 'web'} checkout/return/retry -> real HTTP/JWT/CSRF -> MongoDB -> ${delivery ? 'two delivered orders, shipments and ten ledger outbox records' : 'exactly two paid orders and ledger outbox records'}`,
     );
   } finally {
+    fabricRuntime?.close();
     await server?.close();
     if (!server) await moduleRef?.close();
     if (gateway.listening)
