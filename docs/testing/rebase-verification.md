@@ -62,3 +62,11 @@ that quoting creates no orders. Mobile widgets separately cover invalid pins,
 quote invalidation and pickup loading/saving. Safepay responses are local HTTP
 fixtures; notification/transport dispatch are stubbed. Seeded JWTs do not prove
 Firebase sign-in. Outbox writes do not prove delivery to deployed Fabric.
+
+## Transport client completion — 2026-10-11
+
+Web/mobile now support transporter online/offline, explicit current-coordinate
+updates, priced nearby offers, decline and delivery transitions. Both real HTTP
+checkout-to-delivery harnesses pass using the actual transport service rather than
+a dispatch stub. The mobile adapter's required-ETA mismatch was repaired. See
+`docs/testing/transporter-delivery.md` for commands, assertions and runtime limits.
