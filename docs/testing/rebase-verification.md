@@ -37,3 +37,28 @@ Do not add fabricated coordinates or disable validation to make tests pass.
 
 Real Safepay merchant/browser flows, Firebase acquisition and deployed Fabric
 remain outside this local verification. No push or deployment was performed.
+
+## Delivery contract repair — 2026-10-11
+
+The regression above is now repaired in the working clients. Buyers explicitly
+enter Pakistan delivery coordinates and review `POST /orders/quote` for every
+farmer group before order creation. Quotes include the authoritative item price,
+platform fee, delivery fee, estimated distance and total. Address/cart changes
+invalidate the quote. No default or fabricated coordinates are sent.
+
+Farmers can load and save a complete pickup address/pin through
+`GET/PATCH /farmers/me/farm-location` from Listings on web/mobile. Signup defers
+pickup setup to this form rather than submitting a rejected address-only object.
+The fixture starts with incomplete farm profiles and configures them through the
+real API; its gateway assertions use each persisted order total including delivery.
+
+Both checkout harnesses PASS on the current backend: web React checkout and
+Orders UI, and mobile Dart repositories/controller. They cover real Nest HTTP,
+JWT/role guards, MongoDB transactions, delivery quotes, Safepay initiation and
+resume, signed callback settlement/replay, stock depletion, exactly two paid
+orders, two payments and two ledger outbox records. Web also verifies incomplete
+pickup rejection, invalid coordinates, buyer rejection from pickup PATCH and
+that quoting creates no orders. Mobile widgets separately cover invalid pins,
+quote invalidation and pickup loading/saving. Safepay responses are local HTTP
+fixtures; notification/transport dispatch are stubbed. Seeded JWTs do not prove
+Firebase sign-in. Outbox writes do not prove delivery to deployed Fabric.
