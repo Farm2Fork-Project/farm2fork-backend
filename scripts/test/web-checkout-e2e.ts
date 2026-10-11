@@ -26,9 +26,17 @@ import { JwtAuthGuard } from '../../src/common/guards/jwt-auth.guard';
 import { FirebaseSessionAuthGuard } from '../../src/common/guards/firebase-session-auth.guard';
 import { RolesGuard } from '../../src/common/guards/roles.guard';
 import { CsrfGuard } from '../../src/common/guards/csrf.guard';
-import { MarketplaceModule } from '../../src/modules/marketplace/marketplace.module';
+import { MarketplaceController } from '../../src/modules/marketplace/marketplace.controller';
+import { MarketplaceService } from '../../src/modules/marketplace/marketplace.service';
+import {
+  FarmerProfile,
+  FarmerProfileSchema,
+} from '../../src/modules/auth/schemas/farmer-profile.schema';
+import { NotificationService } from '../../src/modules/notification/notification.service';
+import { TransportService } from '../../src/modules/transport/transport.service';
 import {
   Product,
+  ProductSchema,
   ProductStatus,
   ProductUnit,
 } from '../../src/modules/marketplace/schemas/product.schema';
@@ -102,8 +110,9 @@ async function main() {
     moduleRef = await Test.createTestingModule({
       imports: [
         MongooseModule.forRoot(mongo.getUri()),
-        MarketplaceModule,
         MongooseModule.forFeature([
+          { name: Product.name, schema: ProductSchema },
+          { name: FarmerProfile.name, schema: FarmerProfileSchema },
           { name: User.name, schema: UserSchema },
           { name: Order.name, schema: OrderSchema },
           { name: Payment.name, schema: PaymentSchema },
@@ -114,9 +123,18 @@ async function main() {
           { name: SystemConfig.name, schema: SystemConfigSchema },
         ]),
       ],
-      controllers: [OrderController, PaymentController],
+      controllers: [MarketplaceController, OrderController, PaymentController],
       providers: [
+        MarketplaceService,
         OrderService,
+        {
+          provide: NotificationService,
+          useValue: { notifyInBackground: () => undefined },
+        },
+        {
+          provide: TransportService,
+          useValue: { dispatchInBackground: () => undefined },
+        },
         PaymentService,
         SafepayClient,
         SystemConfigService,
@@ -205,29 +223,41 @@ async function main() {
         { expiresIn: '10m' },
       );
     const apiUrl = `${await server.getUrl()}/api`;
+    const mobile = process.argv.includes('--mobile');
     const exitCode = await new Promise<number>((done, reject) => {
+      const fixtureEnv = {
+        CHECKOUT_TEST_API: apiUrl,
+        CHECKOUT_TEST_BUYER_ID: buyer._id.toHexString(),
+        CHECKOUT_TEST_BUYER_TOKEN: token(buyer),
+        CHECKOUT_TEST_OTHER_TOKEN: token(otherBuyer),
+        CHECKOUT_TEST_FARMER_TOKEN: token(farmers[0]),
+        CHECKOUT_TEST_WEBHOOK_SECRET: webhookSecret,
+      };
       const child = spawn(
-        'pnpm',
-        ['exec', 'vitest', 'run', 'test/live-checkout-flow.test.tsx'],
+        mobile ? (process.env.FLUTTER_BIN ?? 'flutter') : 'pnpm',
+        mobile
+          ? [
+              'test',
+              'test/payments/live_payment_flow_test.dart',
+              '--no-pub',
+              ...Object.entries(fixtureEnv).map(
+                ([key, value]) => `--dart-define=${key}=${value}`,
+              ),
+            ]
+          : ['exec', 'vitest', 'run', 'test/live-checkout-flow.test.tsx'],
         {
-          cwd: resolve(__dirname, '../../../farm2fork-web'),
+          cwd: resolve(
+            __dirname,
+            mobile ? '../../../farm2fork-mobile' : '../../../farm2fork-web',
+          ),
           stdio: 'inherit',
-          env: {
-            ...process.env,
-            CHECKOUT_TEST_API: apiUrl,
-            CHECKOUT_TEST_BUYER_ID: buyer._id.toHexString(),
-            CHECKOUT_TEST_BUYER_TOKEN: token(buyer),
-            CHECKOUT_TEST_OTHER_TOKEN: token(otherBuyer),
-            CHECKOUT_TEST_FARMER_TOKEN: token(farmers[0]),
-            CHECKOUT_TEST_WEBHOOK_SECRET: webhookSecret,
-          },
+          env: { ...process.env, ...fixtureEnv },
         },
       );
       child.on('error', reject);
       child.on('exit', (code) => done(code ?? 1));
     });
-    if (exitCode !== 0)
-      throw new Error(`Web checkout E2E failed (${exitCode})`);
+    if (exitCode !== 0) throw new Error(`Checkout E2E failed (${exitCode})`);
     const orders = await moduleRef
       .get<Model<Order>>(getModelToken(Order.name))
       .find()
@@ -266,7 +296,7 @@ async function main() {
       throw new Error('Unexpected gateway amount or resume order reference');
     }
     console.log(
-      'PASS: web checkout/return/retry -> real HTTP/JWT/CSRF -> MongoDB -> exactly two paid orders and ledger outbox records',
+      `PASS: ${mobile ? 'mobile' : 'web'} checkout/return/retry -> real HTTP/JWT/CSRF -> MongoDB -> exactly two paid orders and ledger outbox records`,
     );
   } finally {
     await server?.close();

@@ -11,6 +11,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import {
   appConfig,
   blockchainConfig,
+  safepayConfig,
   swaggerConfig,
   validationConfig,
 } from './config';
@@ -114,6 +115,39 @@ const featureModules = [
         ),
         SWAGGER_ENABLED: Joi.boolean().default(true),
         SWAGGER_PATH: Joi.string().default('api/docs'),
+        // Safepay (order/tracker + hosted checkout + webhook). Keys are only
+        // required when the gateway is actually enabled - see .env.example.
+        SAFEPAY_ENABLED: Joi.boolean().default(false),
+        SAFEPAY_ENVIRONMENT: Joi.string()
+          .valid('sandbox', 'production')
+          .default('sandbox'),
+        SAFEPAY_API_BASE_URL: Joi.string().optional(),
+        SAFEPAY_CHECKOUT_BASE_URL: Joi.string().optional(),
+        SAFEPAY_PUBLIC_KEY: Joi.string().when('SAFEPAY_ENABLED', {
+          is: true,
+          then: Joi.required(),
+          otherwise: Joi.optional(),
+        }),
+        SAFEPAY_SECRET_KEY: Joi.string().when('SAFEPAY_ENABLED', {
+          is: true,
+          then: Joi.required(),
+          otherwise: Joi.optional(),
+        }),
+        SAFEPAY_WEBHOOK_SECRET: Joi.string().when('SAFEPAY_ENABLED', {
+          is: true,
+          then: Joi.required(),
+          otherwise: Joi.optional(),
+        }),
+        SAFEPAY_REDIRECT_URL: Joi.string().when('SAFEPAY_ENABLED', {
+          is: true,
+          then: Joi.required(),
+          otherwise: Joi.optional(),
+        }),
+        SAFEPAY_CANCEL_URL: Joi.string().when('SAFEPAY_ENABLED', {
+          is: true,
+          then: Joi.required(),
+          otherwise: Joi.optional(),
+        }),
         // Firebase Auth (Google / email-password). The service-account key is a
         // SECRET and must live OUTSIDE the repo (see .env.example).
         FIREBASE_AUTH_ENABLED: Joi.boolean().default(false),
@@ -156,7 +190,13 @@ const featureModules = [
         allowUnknown: true,
         abortEarly: false,
       },
-      load: [appConfig, blockchainConfig, swaggerConfig, validationConfig],
+      load: [
+        appConfig,
+        blockchainConfig,
+        safepayConfig,
+        swaggerConfig,
+        validationConfig,
+      ],
     }),
     ThrottlerModule.forRootAsync({
       inject: [ConfigService],

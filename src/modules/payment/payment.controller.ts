@@ -1,7 +1,17 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiCreatedResponse,
+  ApiHeader,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
@@ -21,7 +31,6 @@ import {
   PaymentListResponseDto,
   PaymentResponseDto,
   SimulatePaymentDto,
-  PaymentWebhookDto,
   QueryPaymentDto,
 } from './dto';
 
@@ -85,15 +94,26 @@ export class PaymentController {
   @ApiOperation({
     summary: 'Gateway payment callback (public)',
     description:
-      'Reserved for JazzCash/Stripe callbacks. It returns 501 until provider-specific signature verification is implemented.',
+      'Safepay is implemented (HMAC-SHA512, header x-sfpy-signature). ' +
+      'JazzCash/Stripe are reserved and return 501.',
   })
   @ApiParam({ name: 'gateway', enum: PaymentGateway })
-  @ApiErrorResponses(400, 501)
+  @ApiHeader({
+    name: 'x-sfpy-signature',
+    required: false,
+    description: 'Safepay webhook HMAC signature (safepay only)',
+  })
+  @ApiBody({
+    description: 'Gateway-specific payload - shape depends on :gateway',
+    schema: { type: 'object' },
+  })
+  @ApiErrorResponses(400, 403, 501)
   webhook(
     @Param('gateway') gateway: PaymentGateway,
-    @Body() dto: PaymentWebhookDto,
-  ): { received: boolean; gateway: PaymentGateway; status: string } {
-    return this.paymentService.handleWebhook(gateway, dto);
+    @Body() body: Record<string, unknown>,
+    @Headers('x-sfpy-signature') signature: string | undefined,
+  ): Promise<{ received: boolean; gateway: PaymentGateway; status: string }> {
+    return this.paymentService.handleWebhook(gateway, body, signature);
   }
 
   @Post(':id/simulate')

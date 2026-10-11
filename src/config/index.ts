@@ -8,5 +8,7 @@ export { swaggerConfig } from './swagger.config';
 export type { ISwaggerConfig } from './swagger.config';
 export { redisConfig } from './redis.config';
 export type { IRedisConfig } from './redis.config';
+export { safepayConfig } from './safepay.config';
+export type { ISafepayConfig, SafepayEnvironment } from './safepay.config';
 export { validationConfig } from './validation.config';
 export type { IValidationConfig } from './validation.config';
