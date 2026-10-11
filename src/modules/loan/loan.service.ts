@@ -165,22 +165,15 @@ export class LoanService {
 
     let filter: FilterQuery<LoanApplicationDocument> = {};
     if (query.status !== undefined) {
-      if (typeof query.status !== 'string') {
+      if (
+        typeof query.status !== 'string' ||
+        !Object.values(LoanStatus).includes(query.status as LoanStatus)
+      ) {
         throw new BadRequestException('Invalid loan status filter.');
       }
       filter = { status: { $eq: query.status } };
     }
 
-        typeof query.status !== 'string' ||
-        !Object.values(LoanStatus).includes(query.status as LoanStatus)
-      ) {
-        throw new BadRequestException('Invalid loan status filter');
-      }
-      statusFilter = query.status as LoanStatus;
-    }
-    const filter: FilterQuery<LoanApplicationDocument> = statusFilter
-      ? { status: statusFilter }
-      : {};
     const [loans, total] = await Promise.all([
       this.loanModel
         .find(filter)
