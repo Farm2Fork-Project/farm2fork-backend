@@ -16,12 +16,14 @@ import {
   BlockchainTxStatus,
   BlockchainTxType,
 } from '../blockchain/schemas/blockchain-transaction.schema';
-import {
-  Product,
-  ProductStatus,
-} from '../marketplace/schemas/product.schema';
+import { Product, ProductStatus } from '../marketplace/schemas/product.schema';
 import { Order, OrderStatus } from '../order/schemas/order.schema';
-import { Payment, PaymentGateway, PaymentStatus } from './schemas/payment.schema';
+import { SafepayClient } from './safepay/safepay.client';
+import {
+  Payment,
+  PaymentGateway,
+  PaymentStatus,
+} from './schemas/payment.schema';
 import { PaymentService } from './payment.service';
 
 const query = <T>(value: T) => ({
@@ -74,9 +76,16 @@ describe('PaymentService', () => {
   let blockchainModel: { create: jest.Mock };
   let connection: { startSession: jest.Mock };
   let session: { withTransaction: jest.Mock; endSession: jest.Mock };
-  let config: { get: jest.Mock };
   let notifications: { notifyInBackground: jest.Mock };
   let transport: { dispatchInBackground: jest.Mock };
+  let config: { get: jest.Mock; getOrThrow: jest.Mock };
+  let safepayClient: {
+    createTracker: jest.Mock;
+    getAuthToken: jest.Mock;
+    buildCheckoutUrl: jest.Mock;
+    verifyWebhookSignature: jest.Mock;
+    fetchPayment: jest.Mock;
+  };
 
   beforeEach(async () => {
     orderModel = { findById: jest.fn() };
@@ -96,9 +105,24 @@ describe('PaymentService', () => {
       endSession: jest.fn(),
     };
     connection = { startSession: jest.fn().mockResolvedValue(session) };
-    config = { get: jest.fn().mockReturnValue(true) };
     notifications = { notifyInBackground: jest.fn() };
     transport = { dispatchInBackground: jest.fn() };
+    config = {
+      get: jest.fn().mockReturnValue(true),
+      getOrThrow: jest.fn().mockImplementation((key: string) => {
+        if (key === 'safepay.redirectUrl')
+          return 'http://localhost/order/complete';
+        if (key === 'safepay.cancelUrl') return 'http://localhost/order/cancel';
+        return true;
+      }),
+    };
+    safepayClient = {
+      createTracker: jest.fn(),
+      getAuthToken: jest.fn(),
+      buildCheckoutUrl: jest.fn(),
+      verifyWebhookSignature: jest.fn(),
+      fetchPayment: jest.fn(),
+    };
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
@@ -114,6 +138,7 @@ describe('PaymentService', () => {
         { provide: ConfigService, useValue: config },
         { provide: NotificationService, useValue: notifications },
         { provide: TransportService, useValue: transport },
+        { provide: SafepayClient, useValue: safepayClient },
       ],
     }).compile();
 
@@ -303,13 +328,156 @@ describe('PaymentService', () => {
     );
   });
 
-  it('rejects public webhooks until provider signature verification exists', () => {
-    expect(() =>
-      service.handleWebhook(PaymentGateway.JazzCash, {
-        gatewayRef: 'unverified-reference',
-        status: PaymentStatus.Success,
-      }),
-    ).toThrow(NotImplementedException);
+  it('rejects public webhooks until provider signature verification exists', async () => {
+    await expect(
+      service.handleWebhook(
+        PaymentGateway.JazzCash,
+        { gatewayRef: 'unverified-reference', status: 'success' },
+        undefined,
+      ),
+    ).rejects.toBeInstanceOf(NotImplementedException);
+  });
+
+  it('creates a Safepay tracker and returns a checkout URL on initiate', async () => {
+    const order = makeOrder();
+    orderModel.findById.mockReturnValue(query(order));
+    paymentModel.findOne.mockReturnValue(query(null));
+    paymentModel.create.mockResolvedValue({
+      _id: new Types.ObjectId(),
+      orderId: order._id,
+      buyerId: order.buyerId,
+      amount: order.grandTotal,
+      currency: 'PKR',
+      gateway: PaymentGateway.Safepay,
+      status: PaymentStatus.Pending,
+      createdAt: new Date('2026-08-11T00:00:00.000Z'),
+      updatedAt: new Date('2026-08-11T00:00:00.000Z'),
+    });
+    safepayClient.createTracker.mockResolvedValue({
+      token: 'track_123',
+      state: 'TRACKER_STARTED',
+    });
+    safepayClient.getAuthToken.mockResolvedValue('tbt_abc');
+    safepayClient.buildCheckoutUrl.mockReturnValue(
+      'https://sandbox.api.getsafepay.com/checkout/pay?beacon=track_123',
+    );
+
+    const result = await service.initiate(buyerId, {
+      orderId,
+      gateway: PaymentGateway.Safepay,
+    });
+
+    expect(safepayClient.createTracker).toHaveBeenCalledWith({
+      amount: order.grandTotal,
+      currency: 'PKR',
+      orderId: order._id.toHexString(),
+    });
+    expect(result.checkoutUrl).toBe(
+      'https://sandbox.api.getsafepay.com/checkout/pay?beacon=track_123',
+    );
+    expect(paymentModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({ gatewayRef: 'track_123' }),
+    );
+  });
+
+  it('re-issues a fresh Safepay tracker when initiate is called again while pending', async () => {
+    const existing = makePayment({
+      id: 'pending-safepay-payment',
+      gateway: PaymentGateway.Safepay,
+    });
+    existing.save.mockResolvedValue(existing);
+    orderModel.findById.mockReturnValue(query(makeOrder()));
+    paymentModel.findOne.mockReturnValue(query(existing));
+    safepayClient.createTracker.mockResolvedValue({
+      token: 'track_456',
+      state: 'TRACKER_STARTED',
+    });
+    safepayClient.getAuthToken.mockResolvedValue('tbt_def');
+    safepayClient.buildCheckoutUrl.mockReturnValue(
+      'https://checkout.example/track_456',
+    );
+
+    const result = await service.initiate(buyerId, {
+      orderId,
+      gateway: PaymentGateway.Safepay,
+    });
+
+    expect(safepayClient.createTracker).toHaveBeenCalledTimes(1);
+    expect(existing.gatewayRef).toBe('track_456');
+    expect(result.checkoutUrl).toBe('https://checkout.example/track_456');
+    expect(paymentModel.create).not.toHaveBeenCalled();
+  });
+
+  it('settles a payment from a verified Safepay payment.succeeded webhook', async () => {
+    const productId = new Types.ObjectId();
+    const payment = makePayment({
+      id: 'safepay-payment',
+      gateway: PaymentGateway.Safepay,
+    });
+    payment.save.mockResolvedValue(payment);
+    const order = makeOrder({
+      items: [{ productId, quantity: 1 }],
+      save: jest.fn(),
+    });
+    order.save.mockResolvedValue(order);
+
+    paymentModel.findOne.mockReturnValue(transactionQuery(payment));
+    orderModel.findById.mockReturnValue(transactionQuery(order));
+    productModel.updateOne.mockReturnValue(
+      transactionQuery({ modifiedCount: 1 }),
+    );
+    blockchainModel.create.mockResolvedValue([{ _id: new Types.ObjectId() }]);
+    safepayClient.verifyWebhookSignature.mockReturnValue(true);
+
+    const result = await service.handleWebhook(
+      PaymentGateway.Safepay,
+      { type: 'payment.succeeded', data: { token: 'track_789' } },
+      'a-valid-signature',
+    );
+
+    expect(safepayClient.verifyWebhookSignature).toHaveBeenCalledWith(
+      { token: 'track_789' },
+      'a-valid-signature',
+    );
+    expect(paymentModel.findOne).toHaveBeenCalledWith({
+      gatewayRef: 'track_789',
+    });
+    expect(result).toEqual({
+      received: true,
+      gateway: PaymentGateway.Safepay,
+      status: PaymentStatus.Success,
+    });
+    expect(payment.status).toBe(PaymentStatus.Success);
+  });
+
+  it('rejects a Safepay webhook with an invalid signature', async () => {
+    safepayClient.verifyWebhookSignature.mockReturnValue(false);
+
+    await expect(
+      service.handleWebhook(
+        PaymentGateway.Safepay,
+        { type: 'payment.succeeded', data: { token: 'track_789' } },
+        'a-forged-signature',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(paymentModel.findOne).not.toHaveBeenCalled();
+  });
+
+  it('acknowledges but ignores Safepay event types it does not act on', async () => {
+    safepayClient.verifyWebhookSignature.mockReturnValue(true);
+
+    const result = await service.handleWebhook(
+      PaymentGateway.Safepay,
+      { type: 'authorization.succeeded', data: { token: 'track_789' } },
+      'a-valid-signature',
+    );
+
+    expect(result).toEqual({
+      received: true,
+      gateway: PaymentGateway.Safepay,
+      status: 'ignored',
+    });
+    expect(paymentModel.findOne).not.toHaveBeenCalled();
   });
 
   it('lists persisted payments scoped to the requesting buyer', async () => {

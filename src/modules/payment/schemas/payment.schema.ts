@@ -6,6 +6,7 @@ export type PaymentDocument = HydratedDocument<Payment>;
 export enum PaymentGateway {
   JazzCash = 'jazzcash',
   Stripe = 'stripe',
+  Safepay = 'safepay',
 }
 
 export enum PaymentStatus {
