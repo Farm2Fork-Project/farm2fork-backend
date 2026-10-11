@@ -1,6 +1,6 @@
 /** Real web components/repository -> Nest HTTP/JWT -> MongoDB transactions.
  * Safepay tracker/passport endpoints use local HTTP fixtures. Notification and
- * transport dispatch are stubbed; ledger outbox persistence is real.
+ * push delivery are stubbed; transport dispatch and ledger outbox persistence are real.
  * Firebase session acquisition and the hosted provider UI are outside this test.
  */
 import 'reflect-metadata';
@@ -34,6 +34,17 @@ import {
   FarmerProfileSchema,
 } from '../../src/modules/auth/schemas/farmer-profile.schema';
 import { NotificationService } from '../../src/modules/notification/notification.service';
+import { TransportController } from '../../src/modules/transport/transport.controller';
+import {
+  Shipment,
+  ShipmentSchema,
+  ShipmentStatus,
+} from '../../src/modules/transport/schemas/shipment.schema';
+import {
+  TransporterProfile,
+  TransporterProfileSchema,
+  VehicleType,
+} from '../../src/modules/auth/schemas/transporter-profile.schema';
 import { TransportService } from '../../src/modules/transport/transport.service';
 import {
   FarmerProfileController,
@@ -117,6 +128,8 @@ async function main() {
         MongooseModule.forRoot(mongo.getUri()),
         MongooseModule.forFeature([
           { name: Product.name, schema: ProductSchema },
+          { name: Shipment.name, schema: ShipmentSchema },
+          { name: TransporterProfile.name, schema: TransporterProfileSchema },
           { name: FarmerProfile.name, schema: FarmerProfileSchema },
           { name: User.name, schema: UserSchema },
           { name: Order.name, schema: OrderSchema },
@@ -133,6 +146,7 @@ async function main() {
         OrderController,
         PaymentController,
         FarmerProfileController,
+        TransportController,
       ],
       providers: [
         FarmerProfileService,
@@ -140,12 +154,12 @@ async function main() {
         OrderService,
         {
           provide: NotificationService,
-          useValue: { notifyInBackground: () => undefined },
+          useValue: {
+            notify: () => Promise.resolve(),
+            notifyInBackground: () => undefined,
+          },
         },
-        {
-          provide: TransportService,
-          useValue: { dispatchInBackground: () => undefined },
-        },
+        TransportService,
         PaymentService,
         SafepayClient,
         SystemConfigService,
@@ -221,6 +235,29 @@ async function main() {
           cnic: `352021234567${index}`,
         })),
       );
+    const transporters = await users.create([
+      { email: 'transporter-one@example.test', role: UserRole.Transporter },
+      { email: 'transporter-two@example.test', role: UserRole.Transporter },
+    ]);
+    await moduleRef
+      .get<Model<TransporterProfile>>(getModelToken(TransporterProfile.name))
+      .create(
+        transporters.map((user, index) => ({
+          userId: user._id,
+          vehicleType: VehicleType.Van,
+          vehicleNumber: `FIX-${index}`,
+          licenseNumber: `fixture-${index}`,
+          cnic: `352021234569${index}`,
+          isAvailable: false,
+        })),
+      );
+    await Promise.all([
+      moduleRef.get<Model<Order>>(getModelToken(Order.name)).init(),
+      moduleRef.get<Model<Shipment>>(getModelToken(Shipment.name)).init(),
+      moduleRef
+        .get<Model<TransporterProfile>>(getModelToken(TransporterProfile.name))
+        .init(),
+    ]);
     const products = moduleRef.get<Model<Product>>(getModelToken(Product.name));
     await products.create(
       farmers.map((farmer, index) => ({
@@ -243,10 +280,15 @@ async function main() {
         { expiresIn: '10m' },
       );
     const apiUrl = `${await server.getUrl()}/api`;
+    const delivery = process.argv.includes('--delivery');
     const mobile = process.argv.includes('--mobile');
     const exitCode = await new Promise<number>((done, reject) => {
       const fixtureEnv = {
         CHECKOUT_TEST_API: apiUrl,
+        CHECKOUT_TEST_DELIVERY: delivery ? 'true' : 'false',
+        CHECKOUT_TEST_TRANSPORTER_ID: transporters[0]._id.toHexString(),
+        CHECKOUT_TEST_TRANSPORTER_TOKEN: token(transporters[0]),
+        CHECKOUT_TEST_SECOND_TRANSPORTER_TOKEN: token(transporters[1]),
         CHECKOUT_TEST_BUYER_ID: buyer._id.toHexString(),
         CHECKOUT_TEST_BUYER_TOKEN: token(buyer),
         CHECKOUT_TEST_OTHER_TOKEN: token(otherBuyer),
@@ -296,8 +338,12 @@ async function main() {
     if (
       orders.length !== 2 ||
       payments.length !== 2 ||
-      records.length !== 2 ||
-      orders.some((order) => order.status !== OrderStatus.Paid) ||
+      records.length !== (delivery ? 10 : 2) ||
+      orders.some(
+        (order) =>
+          order.status !==
+          (delivery ? OrderStatus.Delivered : OrderStatus.Paid),
+      ) ||
       payments.some((payment) => payment.status !== PaymentStatus.Success) ||
       (await products.countDocuments({
         quantity: 0,
@@ -305,6 +351,21 @@ async function main() {
       })) !== 2
     ) {
       throw new Error('Unexpected persisted checkout result');
+    }
+    if (delivery) {
+      const shipments = await moduleRef
+        .get<Model<Shipment>>(getModelToken(Shipment.name))
+        .find()
+        .exec();
+      if (
+        shipments.length !== 2 ||
+        shipments.some(
+          (s) =>
+            s.status !== ShipmentStatus.Delivered ||
+            s.statusHistory.length !== 4,
+        )
+      )
+        throw new Error('Unexpected delivery result');
     }
     if (
       trackerRequests.length !== 4 ||
@@ -321,7 +382,7 @@ async function main() {
       throw new Error('Unexpected gateway amount or resume order reference');
     }
     console.log(
-      `PASS: ${mobile ? 'mobile' : 'web'} checkout/return/retry -> real HTTP/JWT/CSRF -> MongoDB -> exactly two paid orders and ledger outbox records`,
+      `PASS: ${mobile ? 'mobile' : 'web'} checkout/return/retry -> real HTTP/JWT/CSRF -> MongoDB -> ${delivery ? 'two delivered orders, shipments and ten ledger outbox records' : 'exactly two paid orders and ledger outbox records'}`,
     );
   } finally {
     await server?.close();
