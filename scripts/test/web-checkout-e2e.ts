@@ -1,5 +1,6 @@
 /** Real web components/repository -> Nest HTTP/JWT -> MongoDB transactions.
- * Only Safepay's external tracker/passport endpoints are local HTTP fixtures.
+ * Safepay tracker/passport endpoints use local HTTP fixtures. Notification and
+ * transport dispatch are stubbed; ledger outbox persistence is real.
  * Firebase session acquisition and the hosted provider UI are outside this test.
  */
 import 'reflect-metadata';
@@ -34,6 +35,10 @@ import {
 } from '../../src/modules/auth/schemas/farmer-profile.schema';
 import { NotificationService } from '../../src/modules/notification/notification.service';
 import { TransportService } from '../../src/modules/transport/transport.service';
+import {
+  FarmerProfileController,
+  FarmerProfileService,
+} from '../../src/modules/auth/farmer-profile.controller';
 import {
   Product,
   ProductSchema,
@@ -123,8 +128,14 @@ async function main() {
           { name: SystemConfig.name, schema: SystemConfigSchema },
         ]),
       ],
-      controllers: [MarketplaceController, OrderController, PaymentController],
+      controllers: [
+        MarketplaceController,
+        OrderController,
+        PaymentController,
+        FarmerProfileController,
+      ],
       providers: [
+        FarmerProfileService,
         MarketplaceService,
         OrderService,
         {
@@ -201,6 +212,15 @@ async function main() {
       { email: 'farmer-one@example.test', role: UserRole.Farmer },
       { email: 'farmer-two@example.test', role: UserRole.Farmer },
     ]);
+    await moduleRef
+      .get<Model<FarmerProfile>>(getModelToken(FarmerProfile.name))
+      .create(
+        farmers.map((farmer, index) => ({
+          userId: farmer._id,
+          farmName: `Fixture farm ${index + 1}`,
+          cnic: `352021234567${index}`,
+        })),
+      );
     const products = moduleRef.get<Model<Product>>(getModelToken(Product.name));
     await products.create(
       farmers.map((farmer, index) => ({
@@ -231,6 +251,7 @@ async function main() {
         CHECKOUT_TEST_BUYER_TOKEN: token(buyer),
         CHECKOUT_TEST_OTHER_TOKEN: token(otherBuyer),
         CHECKOUT_TEST_FARMER_TOKEN: token(farmers[0]),
+        CHECKOUT_TEST_SECOND_FARMER_TOKEN: token(farmers[1]),
         CHECKOUT_TEST_WEBHOOK_SECRET: webhookSecret,
       };
       const child = spawn(
@@ -289,8 +310,12 @@ async function main() {
       trackerRequests.length !== 4 ||
       trackerRequests.some(
         (body) =>
-          body.amount !== 21000 ||
-          !orders.some((order) => order.id === body.metadata.order_id),
+          !orders.some(
+            (order) =>
+              order.id === body.metadata.order_id &&
+              body.amount === Math.round(order.grandTotal * 100) &&
+              order.deliveryFee > 0,
+          ),
       )
     ) {
       throw new Error('Unexpected gateway amount or resume order reference');
