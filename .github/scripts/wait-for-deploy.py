@@ -5,7 +5,6 @@ import os
 import subprocess
 import sys
 import time
-import urllib.request
 
 component, sha = sys.argv[1:]
 url = 'https://api.farm2fork.tech/_deploy/status/' + component
@@ -15,8 +14,10 @@ for attempt in range(120):
         print('A newer main commit superseded this release; its run will check deployment.')
         sys.exit(0)
     try:
-        request = urllib.request.Request(url + '?sha=' + sha, headers={'Cache-Control': 'no-cache'})
-        state = json.load(urllib.request.urlopen(request, timeout=15))
+        state = json.loads(subprocess.check_output([
+            'curl', '--fail', '--silent', '--show-error', '--max-time', '15',
+            '--header', 'Cache-Control: no-cache', url + '?sha=' + sha,
+        ], text=True))
         if state.get('deployed_sha') == sha and state.get('status') == 'success':
             print(component + ' activated and checked on EC2: ' + sha)
             if path := os.environ.get('GITHUB_STEP_SUMMARY'):

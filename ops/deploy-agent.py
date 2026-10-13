@@ -119,7 +119,7 @@ def verify_provenance(path, bundle, component, sha):
     workflow = repo + '/.github/workflows/deploy.yml'
     run(['gh', 'attestation', 'verify', path, '--bundle', bundle,
          '--repo', repo, '--source-ref', 'refs/heads/main', '--source-digest', sha,
-         '--signer-workflow', workflow, '--deny-self-hosted-runners',
+         '--deny-self-hosted-runners',
          '--cert-identity', 'https://github.com/' + workflow + '@refs/heads/main'], timeout=120)
 
 

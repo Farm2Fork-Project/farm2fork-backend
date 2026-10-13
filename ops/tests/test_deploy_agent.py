@@ -155,6 +155,7 @@ class ReleaseTests(unittest.TestCase):
             agent.verify_provenance(pathlib.Path('artifact'), pathlib.Path('bundle'), 'ai', 'a' * 40)
             args = run.call_args.args[0]
             self.assertIn('--deny-self-hosted-runners', args)
+            self.assertNotIn('--signer-workflow', args)  # Mutually exclusive with exact cert identity.
             self.assertEqual(args[args.index('--source-digest') + 1], 'a' * 40)
             self.assertEqual(args[args.index('--source-ref') + 1], 'refs/heads/main')
             self.assertEqual(args[args.index('--cert-identity') + 1],
