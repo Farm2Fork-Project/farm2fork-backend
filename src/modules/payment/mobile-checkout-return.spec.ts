@@ -25,7 +25,7 @@ const orderId = new Types.ObjectId();
 describe('Mobile checkout return contract', () => {
   let service: PaymentService;
   const buildCheckoutUrl = jest.fn(
-    () => 'https://sandbox.api.getsafepay.com/checkout/pay',
+    () => 'https://sandbox.api.getsafepay.com/embedded/',
   );
   beforeEach(async () => {
     buildCheckoutUrl.mockClear();

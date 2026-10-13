@@ -8,7 +8,7 @@ const baseConfig = {
   enabled: true,
   environment: 'sandbox' as const,
   apiBaseUrl: 'https://sandbox.api.getsafepay.com',
-  checkoutBaseUrl: 'https://sandbox.api.getsafepay.com/checkout',
+  checkoutBaseUrl: 'https://sandbox.api.getsafepay.com/embedded',
   publicKey: 'sec_public',
   secretKey: 'secret_key',
   webhookSecret: 'webhook_secret',
@@ -96,23 +96,30 @@ describe('SafepayClient', () => {
     );
   });
 
-  it('builds a checkout URL carrying both known param spellings', () => {
+  it('builds the v3 embedded checkout URL used by the official SDK', () => {
     const url = client.buildCheckoutUrl({
       trackerToken: 'track_1',
       authToken: 'tbt_1',
-      orderId: 'order-1',
       redirectUrl: 'http://localhost/complete',
       cancelUrl: 'http://localhost/cancel',
     });
 
     const parsed = new URL(url);
     expect(parsed.origin + parsed.pathname).toBe(
-      'https://sandbox.api.getsafepay.com/checkout/pay',
+      'https://sandbox.api.getsafepay.com/embedded/',
     );
-    expect(parsed.searchParams.get('beacon')).toBe('track_1');
     expect(parsed.searchParams.get('tracker')).toBe('track_1');
     expect(parsed.searchParams.get('tbt')).toBe('tbt_1');
-    expect(parsed.searchParams.get('env')).toBe('sandbox');
+    expect(parsed.searchParams.get('environment')).toBe('sandbox');
+    expect(parsed.searchParams.get('source')).toBe('hosted');
+    expect(parsed.searchParams.get('redirect_url')).toBe(
+      'http://localhost/complete',
+    );
+    expect(parsed.searchParams.get('cancel_url')).toBe(
+      'http://localhost/cancel',
+    );
+    // The legacy v1 page's parameters must not be sent with a v3 tracker.
+    expect(parsed.searchParams.has('beacon')).toBe(false);
   });
 
   it('verifies a webhook signature computed the same way as the payload data', () => {
