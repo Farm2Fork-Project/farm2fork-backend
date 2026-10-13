@@ -142,4 +142,51 @@ describe('SafepayClient', () => {
     const tampered = { token: 'track_1', status: 'failed' };
     expect(client.verifyWebhookSignature(tampered, signature)).toBe(false);
   });
+
+  describe('webhook signature schemes', () => {
+    const body = {
+      type: 'payment.failed',
+      version: '2.0.0',
+      data: { tracker: 'track_1', code: 403, metadata: { order_id: 'o1' } },
+    };
+    const hmac = (payload: Buffer) =>
+      createHmac('sha512', baseConfig.webhookSecret)
+        .update(payload)
+        .digest('hex');
+
+    it('accepts a signature over the exact raw request body', () => {
+      const rawBody = Buffer.from(JSON.stringify(body, null, 2));
+      expect(
+        client.verifyWebhookSignature(body.data, hmac(rawBody), {
+          body,
+          rawBody,
+        }),
+      ).toBe(true);
+    });
+
+    it('accepts a signature over the whole parsed payload', () => {
+      const signature = hmac(Buffer.from(JSON.stringify(body)));
+      expect(
+        client.verifyWebhookSignature(body.data, signature, { body }),
+      ).toBe(true);
+    });
+
+    it('rejects a signature made with another secret or over other content', () => {
+      const forged = createHmac('sha512', 'not-the-secret')
+        .update(Buffer.from(JSON.stringify(body)))
+        .digest('hex');
+      const rawBody = Buffer.from(JSON.stringify(body));
+      expect(
+        client.verifyWebhookSignature(body.data, forged, { body, rawBody }),
+      ).toBe(false);
+      // A data-only signature must not let the event type be swapped when the
+      // sender signed the whole body, and vice versa: content decides.
+      expect(
+        client.verifyWebhookSignature(body.data, hmac(Buffer.from('other')), {
+          body,
+          rawBody,
+        }),
+      ).toBe(false);
+    });
+  });
 });
