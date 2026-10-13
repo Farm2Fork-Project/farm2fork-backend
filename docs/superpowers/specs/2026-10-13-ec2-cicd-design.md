@@ -1,0 +1,11 @@
+# EC2 CI/CD design
+
+The user authorized completing the EC2 deployment and all three repositories' merge-to-main deployment pipelines. Docker manages processes; a root-owned systemd agent serializes activation. GitHub-hosted Actions run tests, build immutable full-SHA artifacts, and publish complete checksummed releases. EC2 polls public main references and consumes only the release matching the exact main SHA. No production runtime credentials or SSH keys are needed in Actions. A read-only HTTPS receipt endpoint reports activation or rollback back to Actions.
+
+Applications use candidate readiness, persistent named volumes and previous-image rollback. Checks cover HTTP liveness, MongoDB replica-set access, Redis, authenticated AI pricing, Fabric evaluation and worker stability. Crash recovery retains a transaction journal before switching images. Failed SHAs require explicit operator retry; newer main releases supersede pending intermediate commits. Main branch protection requires CI before merges. Publishing is restricted to the main-only production environment.
+
+Fabric deployment never regenerates identities or resets volumes. Changed chaincode source triggers package installation, approval and commit at the current sequence plus one. Unchanged source performs a ledger read without upgrading. Before changing chaincode, stop the worker/peer/orderer for a consistent local ledger-and-identity snapshot and restart them. Recovery deploys the previous package at a higher sequence, never rewinds live ledger data. A generated User1 client identity is mounted in app containers; admin keys remain on the host.
+
+Existing backend/AI develop commits are the EC2 source baseline and are promoted through explicit bootstrap PRs. CI tests run on PRs without production secrets. Reviewed operational scripts are installed separately as root-owned files; merging application source cannot silently replace the deployment controller.
+
+This is single-host deployment with brief restart downtime, not high availability. Local snapshots do not replace off-instance backups. Missing trained weights remain unavailable and cannot be fabricated by deployment. Payments remain disabled without gateway configuration. Real-user authentication acceptance requires a user session beyond Admin SDK initialization.
