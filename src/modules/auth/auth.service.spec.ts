@@ -3,7 +3,11 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
-import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { FirebaseAuthService } from '../../infrastructure/firebase/firebase-auth.service';
 import { AuthProvider } from '../../common/enums/auth-provider.enum';
 import { UserRole } from '../../common/enums/user-role.enum';
@@ -228,6 +232,27 @@ describe('AuthService Firebase identity contract', () => {
     );
     expect(farmerModel.create).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    'onboardFarmerWithFirebase',
+    'onboardBuyerWithFirebase',
+    'onboardTransporterWithFirebase',
+    'onboardFinancialPartnerWithFirebase',
+  ] as const)(
+    'rejects selector-shaped CNIC before %s reaches MongoDB',
+    async (method) => {
+      firebaseAuth.verifyIdToken.mockResolvedValue(identity);
+      userModel.exists.mockReturnValue(query(null));
+      const dto = { idToken: 'id-token', cnic: { $ne: null } };
+      await expect(service[method](dto as never)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(farmerModel.exists).not.toHaveBeenCalled();
+      expect(buyerModel.exists).not.toHaveBeenCalled();
+      expect(financialPartnerModel.exists).not.toHaveBeenCalled();
+      expect(userModel.create).not.toHaveBeenCalled();
+    },
+  );
 
   it('does not onboard an unverified Firebase identity', async () => {
     firebaseAuth.verifyIdToken.mockResolvedValue({

@@ -1,5 +1,6 @@
 import { avatarUrl } from '../../infrastructure/storage/avatar';
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -21,6 +22,7 @@ import {
   FirebaseOnboardTransporterDto,
 } from './dto';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
+import { CNIC_REGEX } from './dto/register.dto';
 import {
   BuyerProfile,
   BuyerProfileDocument,
@@ -114,11 +116,12 @@ export class AuthService {
   async onboardFarmerWithFirebase(
     dto: FirebaseOnboardFarmerDto,
   ): Promise<AuthResultDto> {
+    const cnic = this.validatedCnic(dto.cnic);
     const identity = await this.beginFirebaseOnboarding(
       dto.idToken,
       UserRole.Farmer,
     );
-    if (await this.farmerProfileModel.exists({ cnic: dto.cnic })) {
+    if (await this.farmerProfileModel.exists({ cnic: { $eq: cnic } })) {
       throw new ConflictException('CNIC is already registered');
     }
 
@@ -144,11 +147,12 @@ export class AuthService {
   async onboardBuyerWithFirebase(
     dto: FirebaseOnboardBuyerDto,
   ): Promise<AuthResultDto> {
+    const cnic = this.validatedCnic(dto.cnic);
     const identity = await this.beginFirebaseOnboarding(
       dto.idToken,
       UserRole.Buyer,
     );
-    if (await this.buyerProfileModel.exists({ cnic: dto.cnic })) {
+    if (await this.buyerProfileModel.exists({ cnic: { $eq: cnic } })) {
       throw new ConflictException('CNIC is already registered');
     }
 
@@ -172,11 +176,12 @@ export class AuthService {
   async onboardTransporterWithFirebase(
     dto: FirebaseOnboardTransporterDto,
   ): Promise<AuthResultDto> {
+    const cnic = this.validatedCnic(dto.cnic);
     const identity = await this.beginFirebaseOnboarding(
       dto.idToken,
       UserRole.Transporter,
     );
-    if (await this.transporterProfileModel.exists({ cnic: dto.cnic })) {
+    if (await this.transporterProfileModel.exists({ cnic: { $eq: cnic } })) {
       throw new ConflictException('CNIC is already registered');
     }
 
@@ -201,11 +206,14 @@ export class AuthService {
   async onboardFinancialPartnerWithFirebase(
     dto: FirebaseOnboardFinancialPartnerDto,
   ): Promise<AuthResultDto> {
+    const cnic = this.validatedCnic(dto.cnic);
     const identity = await this.beginPrivilegedFirebaseOnboarding(
       dto.idToken,
       UserRole.FinancialPartner,
     );
-    if (await this.financialPartnerProfileModel.exists({ cnic: dto.cnic })) {
+    if (
+      await this.financialPartnerProfileModel.exists({ cnic: { $eq: cnic } })
+    ) {
       throw new ConflictException('CNIC is already registered');
     }
 
@@ -260,6 +268,13 @@ export class AuthService {
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
+
+  private validatedCnic(value: unknown): string {
+    if (typeof value !== 'string' || !CNIC_REGEX.test(value)) {
+      throw new BadRequestException('cnic must be a valid Pakistani CNIC');
+    }
+    return String(value);
+  }
 
   /**
    * Resolve an existing account for a verified Firebase identity. Matches by
