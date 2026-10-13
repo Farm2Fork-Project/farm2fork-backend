@@ -60,6 +60,18 @@ export class User {
   @Prop({ trim: true })
   phone?: string;
 
+  /** Person's own name. Roles also have a business/farm/institution name on their profile. */
+  @Prop({ trim: true })
+  fullName?: string;
+
+  /**
+   * Cloudinary delivery path of the avatar (`v<version>/farm2fork/avatars/<id>`),
+   * or `local:<file>` in development without Cloudinary. Never a full URL: the
+   * crop and size are applied at delivery time, see infrastructure/storage/avatar.ts.
+   */
+  @Prop({ trim: true })
+  avatarPath?: string;
+
   @Prop({ default: false })
   isVerified!: boolean;
 

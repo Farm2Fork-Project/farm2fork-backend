@@ -9,6 +9,7 @@ import { v2 as cloudinary } from 'cloudinary';
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { mkdir, readFile, realpath, writeFile } from 'fs/promises';
 import { basename, join, resolve, sep } from 'path';
+import { AVATAR_PATH, AVATAR_PUBLIC_ID_PREFIX } from './avatar';
 import {
   DetectedFile,
   MAX_DOCUMENT_BYTES,
@@ -97,6 +98,50 @@ export class StorageService {
     const name = await this.writeLocal('public', buffer, file);
     // Root-relative: clients resolve it against the API origin.
     return `/api/files/public/${name}`;
+  }
+
+  /**
+   * Stores a user's avatar and returns only its delivery path, which is all the
+   * database keeps (`v<version>/farm2fork/avatars/<userId>`). The public_id is
+   * derived from the authenticated user, so an upload can only ever replace
+   * that user's own avatar; `overwrite` + `invalidate` swap the CDN copy and
+   * the new version changes the path, so stale caches are never served.
+   */
+  async uploadAvatar(buffer: Buffer, userId: string): Promise<string> {
+    const file = this.validate(buffer, 'image');
+    if (this.useCloudinary) {
+      const result = await this.cloudinaryUpload(buffer, {
+        public_id: `${AVATAR_PUBLIC_ID_PREFIX}/${userId}`,
+        asset_folder: AVATAR_PUBLIC_ID_PREFIX,
+        resource_type: 'image',
+        type: 'upload',
+        overwrite: true,
+        invalidate: true,
+        allowed_formats: ['jpg', 'png', 'webp'],
+        // Never keep more pixels than an avatar can use.
+        transformation: [{ width: 1024, height: 1024, crop: 'limit' }],
+      });
+      return `v${result.version}/${result.public_id}`;
+    }
+    const name = await this.writeLocal('public', buffer, file);
+    return `local:${name}`;
+  }
+
+  /** Removes an avatar from Cloudinary. Best effort: the database is the source of truth. */
+  async deleteAvatar(path: string): Promise<void> {
+    if (!this.useCloudinary || !AVATAR_PATH.test(path)) return;
+    const publicId = path.slice(path.indexOf('/') + 1);
+    try {
+      await cloudinary.uploader.destroy(publicId, {
+        resource_type: 'image',
+        type: 'upload',
+        invalidate: true,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Could not delete avatar ${publicId}: ${(error as Error).message}`,
+      );
+    }
   }
 
   /** Stores a private document and returns an opaque reference. */
@@ -219,7 +264,12 @@ export class StorageService {
   private cloudinaryUpload(
     buffer: Buffer,
     options: Record<string, unknown>,
-  ): Promise<{ secure_url: string; public_id: string; format: string }> {
+  ): Promise<{
+    secure_url: string;
+    public_id: string;
+    format: string;
+    version: number;
+  }> {
     return new Promise((resolvePromise, reject) => {
       const stream = cloudinary.uploader.upload_stream(
         options,

@@ -15,6 +15,16 @@ export class AuthUserDto {
   @ApiProperty({ required: false })
   phone?: string;
 
+  @ApiProperty({ required: false, description: "The person's own name." })
+  fullName?: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      '256px square avatar served by the Cloudinary CDN (root-relative in local development). Absent when the user has none.',
+  })
+  avatarUrl?: string;
+
   @ApiProperty()
   isVerified!: boolean;
 
