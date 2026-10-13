@@ -153,7 +153,6 @@ export class PaymentService {
     const checkoutUrl = this.safepayClient.buildCheckoutUrl({
       trackerToken: tracker.token,
       authToken,
-      orderId,
       redirectUrl: this.returnUrl('safepay.redirectUrl', orderId, mobile),
       cancelUrl: this.returnUrl('safepay.cancelUrl', orderId, mobile),
     });

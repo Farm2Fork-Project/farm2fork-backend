@@ -7,7 +7,8 @@ export class InitiatePaymentResponseDto {
   payment!: PaymentResponseDto;
 
   @ApiPropertyOptional({
-    example: 'https://sandbox.api.getsafepay.com/checkout/pay?beacon=...',
+    example:
+      'https://sandbox.api.getsafepay.com/embedded/?environment=sandbox&tracker=...',
     description:
       'Hosted checkout URL to open (gateway === safepay only). Open in a ' +
       'webview/browser tab; the buyer completes payment there.',
