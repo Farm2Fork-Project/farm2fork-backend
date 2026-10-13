@@ -4,38 +4,63 @@ services:
       context: .
       target: development
     container_name: f2f-nestjs
-    env_file:
-      - .env
     environment:
-      DATABASE_URL: mongodb://mongodb:27017/farm2fork
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      FIREBASE_AUTH_ENABLED: ${FIREBASE_AUTH_ENABLED:?FIREBASE_AUTH_ENABLED is required}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:?FIREBASE_PROJECT_ID is required}
+      FIREBASE_SERVICE_ACCOUNT_JSON: ${FIREBASE_SERVICE_ACCOUNT_JSON:?FIREBASE_SERVICE_ACCOUNT_JSON is required}
+      # Credentialed web CORS + Firebase HTTP-only session cookie.
+      CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
+      WEB_APP_ORIGIN: ${WEB_APP_ORIGIN:?WEB_APP_ORIGIN is required}
+      WEB_SESSION_TTL_SECONDS: ${WEB_SESSION_TTL_SECONDS:?WEB_SESSION_TTL_SECONDS is required}
+      WEB_SESSION_COOKIE_NAME: ${WEB_SESSION_COOKIE_NAME:?WEB_SESSION_COOKIE_NAME is required}
+      WEB_SESSION_COOKIE_SECURE: ${WEB_SESSION_COOKIE_SECURE:?WEB_SESSION_COOKIE_SECURE is required}
     ports:
-      - '3000:3000'
+      - '3002:3000'
     depends_on:
-      mongodb:
-        condition: service_healthy
       redis:
         condition: service_healthy
     volumes:
       - .:/app
       - /app/node_modules
 
-  mongodb:
-    image: mongo:8.2.4-noble
-    container_name: f2f-mongodb
-    ports:
-      - '27017:27017'
+  backend-worker:
+    build:
+      context: .
+      target: development
+    container_name: f2f-worker
+    command: pnpm start:worker:dev
+    environment:
+      # The anonymous /app/node_modules volume is initialised by pnpm on first
+      # start; CI prevents its non-interactive purge confirmation from exiting.
+      CI: 'true'
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      BLOCKCHAIN_WORKER_ENABLED: 'true'
+      FABRIC_CHANNEL_NAME: ${FABRIC_CHANNEL_NAME:-farm2forkchannel}
+      FABRIC_CHAINCODE_NAME: ${FABRIC_CHAINCODE_NAME:-farm2fork-chaincode}
+      FABRIC_MSP_ID: ${FABRIC_MSP_ID:-Farm2ForkMSP}
+      FABRIC_PEER_ENDPOINT: ${FABRIC_PEER_ENDPOINT:-peer0.farm2fork.com:7051}
+      FABRIC_PEER_HOST_ALIAS: ${FABRIC_PEER_HOST_ALIAS:-peer0.farm2fork.com}
+      FABRIC_TLS_ROOT_CERT_PATH: /fabric/crypto/peerOrganizations/farm2fork.com/peers/peer0.farm2fork.com/tls/ca.crt
+      FABRIC_IDENTITY_CERT_PATH: /fabric/crypto/peerOrganizations/farm2fork.com/users/Admin@farm2fork.com/msp/signcerts/Admin@farm2fork.com-cert.pem
+      FABRIC_IDENTITY_KEY_PATH: /fabric/crypto/peerOrganizations/farm2fork.com/users/Admin@farm2fork.com/msp/keystore/priv_sk
+    depends_on:
+      redis:
+        condition: service_healthy
     volumes:
-      - mongodb_data:/data/db
-    healthcheck:
-      test: ['CMD', 'mongosh', '--quiet', '--eval', 'db.runCommand({ ping: 1 })']
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - .:/app
+      - /app/node_modules
+      - ${FABRIC_CRYPTO_HOST_PATH:?FABRIC_CRYPTO_HOST_PATH is required}:/fabric/crypto:ro
+    networks:
+      - default
+      - fabric
 
   redis:
     image: redis:8.6.3-alpine3.23
     container_name: f2f-redis
+    command: redis-server --appendonly yes
     ports:
       - '6379:6379'
     volumes:
@@ -47,5 +72,9 @@ services:
       retries: 5
 
 volumes:
-  mongodb_data:
   redis_data:
+
+networks:
+  fabric:
+    external: true
+    name: ${FABRIC_DOCKER_NETWORK:-farm2fork-fabric}

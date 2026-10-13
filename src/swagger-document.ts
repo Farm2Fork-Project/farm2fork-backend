@@ -1,0 +1,56 @@
+import { INestApplication } from '@nestjs/common';
+import { DocumentBuilder, OpenAPIObject, SwaggerModule } from '@nestjs/swagger';
+
+export function createSwaggerDocument(
+  app: INestApplication,
+  port: number,
+  apiVersion: string,
+): OpenAPIObject {
+  const config = new DocumentBuilder()
+    .setTitle('Farm2Fork API')
+    .setDescription(
+      'Farm2Fork API Documentation - Quality produce direct from farms',
+    )
+    .setVersion(apiVersion)
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        description: 'Enter JWT token',
+      },
+      'JWT-auth',
+    )
+    .addCookieAuth(
+      'f2f_session',
+      {
+        type: 'apiKey',
+        in: 'cookie',
+        name: 'f2f_session',
+        description: 'Firebase Admin HTTP-only web session cookie',
+      },
+      'Firebase-session',
+    )
+    .addServer(`http://localhost:${port}`, 'Local Development')
+    .addServer('https://api.farm2fork.com', 'Production')
+    .addTag('Health', 'Application health check endpoints')
+    .addTag(
+      'Auth',
+      'Firebase sign-in, onboarding, and secure web/mobile sessions',
+    )
+    .addTag('Marketplace', 'Product listings, search, filtering and QR codes')
+    .addTag('Orders', 'Order placement, listing and cancellation')
+    .addTag('Payments', 'Payment initiation, gateway callbacks and refunds')
+    .addTag(
+      'Shipments',
+      'Shipment discovery, claims, tracking and delivery updates',
+    )
+    .addTag('AI', 'Crop quality grading and price suggestions for farmers')
+    .addTag(
+      'Traceability',
+      'Public product provenance backed by the Hyperledger Fabric ledger',
+    )
+    .build();
+
+  return SwaggerModule.createDocument(app, config);
+}

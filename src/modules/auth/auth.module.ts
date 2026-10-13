@@ -1,0 +1,72 @@
+import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { JwtModule } from '@nestjs/jwt';
+import type { JwtSignOptions } from '@nestjs/jwt';
+import { MongooseModule } from '@nestjs/mongoose';
+import { PassportModule } from '@nestjs/passport';
+import { AccountController } from './account.controller';
+import { AccountService } from './account.service';
+import { AuthController } from './auth.controller';
+import {
+  FarmerProfileController,
+  FarmerProfileService,
+} from './farmer-profile.controller';
+import { AuthService } from './auth.service';
+import { JwtStrategy } from './strategies/jwt.strategy';
+import { FirebaseSessionAuthGuard } from '../../common/guards/firebase-session-auth.guard';
+import {
+  BuyerProfile,
+  BuyerProfileSchema,
+} from './schemas/buyer-profile.schema';
+import {
+  FarmerProfile,
+  FarmerProfileSchema,
+} from './schemas/farmer-profile.schema';
+import {
+  FinancialPartnerProfile,
+  FinancialPartnerProfileSchema,
+} from './schemas/financial-partner-profile.schema';
+import {
+  TransporterProfile,
+  TransporterProfileSchema,
+} from './schemas/transporter-profile.schema';
+import { User, UserSchema } from './schemas/user.schema';
+import { AuditLog, AuditLogSchema } from '../admin/schemas/audit-log.schema';
+
+@Module({
+  imports: [
+    PassportModule,
+    JwtModule.registerAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        secret:
+          configService.get<string>('JWT_SECRET') ?? 'dev-insecure-secret',
+        signOptions: {
+          expiresIn: (configService.get<string>('JWT_EXPIRATION') ??
+            '24h') as JwtSignOptions['expiresIn'],
+        },
+      }),
+    }),
+    MongooseModule.forFeature([
+      { name: User.name, schema: UserSchema },
+      { name: AuditLog.name, schema: AuditLogSchema },
+      { name: FarmerProfile.name, schema: FarmerProfileSchema },
+      { name: BuyerProfile.name, schema: BuyerProfileSchema },
+      { name: TransporterProfile.name, schema: TransporterProfileSchema },
+      {
+        name: FinancialPartnerProfile.name,
+        schema: FinancialPartnerProfileSchema,
+      },
+    ]),
+  ],
+  controllers: [AuthController, AccountController, FarmerProfileController],
+  providers: [
+    AuthService,
+    AccountService,
+    JwtStrategy,
+    FirebaseSessionAuthGuard,
+    FarmerProfileService,
+  ],
+  exports: [AuthService, FirebaseSessionAuthGuard, MongooseModule],
+})
+export class AuthModule {}

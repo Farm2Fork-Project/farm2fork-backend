@@ -1,0 +1,33 @@
+{
+  "runId": "gateway-3226f256-f594-4909-97d4-f54a63a3aaa8",
+  "measuredAt": "2026-08-17T13:17:38.527Z",
+  "path": "Fabric Gateway gRPC/TLS direct submission or evaluation",
+  "operations": 100,
+  "concurrency": 10,
+  "rows": [
+    {
+      "name": "Listing Event",
+      "count": 100,
+      "elapsedMs": 479.285292,
+      "throughputTps": 208.64175017646605,
+      "p50Ms": 42.19191599999999,
+      "p95Ms": 66.98720900000001
+    },
+    {
+      "name": "Shipment Event",
+      "count": 100,
+      "elapsedMs": 428.077625,
+      "throughputTps": 233.60203750313448,
+      "p50Ms": 39.23837500000002,
+      "p95Ms": 82.43458300000009
+    },
+    {
+      "name": "Product History Query",
+      "count": 100,
+      "elapsedMs": 71.43349999999998,
+      "throughputTps": 1399.8838096438003,
+      "p50Ms": 5.716666000000032,
+      "p95Ms": 14.983375000000137
+    }
+  ]
+}
