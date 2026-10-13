@@ -7,9 +7,14 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFiles,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
@@ -23,9 +28,11 @@ import { QrRenderRateLimit } from '../../common/rate-limit/rate-limits';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
 import type { RequestUser } from '../../common/guards/roles.guard';
-import { MarketplaceService } from './marketplace.service';
+import { MAX_IMAGE_BYTES } from '../../infrastructure/storage/file-kind';
+import { MAX_PRODUCT_IMAGES, MarketplaceService } from './marketplace.service';
 import {
   CreateProductDto,
+  ProductImagesResponseDto,
   ProductListResponseDto,
   ProductQrResponseDto,
   ProductResponseDto,
@@ -37,6 +44,41 @@ import {
 @Controller('products')
 export class MarketplaceController {
   constructor(private readonly marketplaceService: MarketplaceService) {}
+
+  @Post('images')
+  @Roles(UserRole.Farmer)
+  @ApiBearerAuth('JWT-auth')
+  @UseInterceptors(
+    FilesInterceptor('images', MAX_PRODUCT_IMAGES, {
+      limits: { fileSize: MAX_IMAGE_BYTES, files: MAX_PRODUCT_IMAGES },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['images'],
+      properties: {
+        images: {
+          type: 'array',
+          items: { type: 'string', format: 'binary' },
+          description: 'Up to 4 JPEG/PNG/WebP photos, 5 MB each',
+        },
+      },
+    },
+  })
+  @ApiOperation({
+    summary: 'Upload listing photos',
+    description:
+      'Farmer only. Returns public URLs to send as `images` when creating or editing a product.',
+  })
+  @ApiCreatedResponse({ type: ProductImagesResponseDto })
+  @ApiErrorResponses(400, 401, 403, 413)
+  uploadImages(
+    @UploadedFiles() images?: { buffer: Buffer }[],
+  ): Promise<ProductImagesResponseDto> {
+    return this.marketplaceService.uploadImages(images);
+  }
 
   @Post()
   @Roles(UserRole.Farmer)
