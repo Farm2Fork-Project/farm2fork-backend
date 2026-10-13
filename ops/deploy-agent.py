@@ -297,7 +297,8 @@ def process(component):
 def wait_fabric():
     for _ in range(20):
         try:
-            run(['bash', OPS / 'fabric-release.sh', 'verify'], timeout=20)
+            # Recovery must not depend on a potentially broken new chaincode.
+            run(['bash', OPS / 'fabric-release.sh', 'ready'], timeout=20)
             return
         except (RuntimeError, subprocess.TimeoutExpired):
             time.sleep(2)

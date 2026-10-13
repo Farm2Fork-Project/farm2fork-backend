@@ -4,14 +4,20 @@ set -euo pipefail
 ROOT=${F2F_ROOT:-/opt/farm2fork}
 source "$ROOT/farm2fork-blockchain/network/scripts/env.sh"
 
-verify() {
+ready() {
   peer_cmd peer channel getinfo -c "$CHANNEL_NAME" >/dev/null
+  peer_cmd peer lifecycle chaincode querycommitted -C "$CHANNEL_NAME" -n "$CHAINCODE_NAME" --output json >/dev/null
+}
+
+verify() {
+  ready
   peer_cmd peer lifecycle chaincode querycommitted -C "$CHANNEL_NAME" -n "$CHAINCODE_NAME" --output json
   peer_cmd peer chaincode query -C "$CHANNEL_NAME" -n "$CHAINCODE_NAME" \
     -c '{"Args":["GetTransactionsByProductId","deployment-read-probe"]}' >/dev/null
 }
 
 case ${1:-} in
+  ready) ready ;;
   verify) verify ;;
   deploy)
     package=${2:?package path required}
@@ -44,5 +50,5 @@ case ${1:-} in
     verify
     docker ps -q --filter network=farm2fork-fabric | xargs -r docker update --restart unless-stopped >/dev/null
     ;;
-  *) echo 'Usage: fabric-release.sh verify | deploy PACKAGE SOURCE_SHA' >&2; exit 2 ;;
+  *) echo 'Usage: fabric-release.sh ready | verify | deploy PACKAGE SOURCE_SHA' >&2; exit 2 ;;
 esac
