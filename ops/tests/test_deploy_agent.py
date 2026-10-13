@@ -160,6 +160,23 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(args[args.index('--cert-identity') + 1],
                              'https://github.com/Farm2Fork-Project/farm2fork-ai/.github/workflows/deploy.yml@refs/heads/main')
 
+    def test_interrupted_chaincode_recovery_does_not_probe_broken_new_contract(self):
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(agent, 'STATE', pathlib.Path(folder)), \
+                mock.patch.object(agent, 'dc'), mock.patch.object(agent, 'dependency_probe'):
+            old = {'sha': 'b' * 40, 'source_hash': 'old', 'package': '/old-package'}
+            agent.atomic_json(pathlib.Path(folder) / 'transaction.json',
+                              {'component': 'blockchain', 'sha': 'a' * 40, 'phase': 'upgrading', 'old_chaincode': old})
+            calls = []
+            def execute(args, **kwargs):
+                calls.append(args)
+                if 'verify' in args:
+                    raise RuntimeError('new contract cannot evaluate')
+            with mock.patch.object(agent, 'run', side_effect=execute):
+                agent.recover_interrupted()
+            self.assertTrue(any('deploy' in args and '/old-package' in args for args in calls))
+            self.assertFalse(any('verify' in args for args in calls))
+            self.assertEqual(agent.read_json(pathlib.Path(folder) / 'blockchain.json')['status'], 'rolled_back')
+
 
 if __name__ == '__main__':
     unittest.main()
