@@ -10,6 +10,7 @@ import {
   BlockchainTxStatus,
   BlockchainTxType,
 } from '../blockchain/schemas/blockchain-transaction.schema';
+import { StorageService } from '../../infrastructure/storage/storage.service';
 import { MarketplaceService, UNKNOWN_LOCATION } from './marketplace.service';
 import {
   Product,
@@ -80,6 +81,7 @@ describe('MarketplaceService', () => {
   });
   let session: { withTransaction: jest.Mock; endSession: jest.Mock };
   let configValues: Record<string, string | undefined>;
+  let storage: { validate: jest.Mock; uploadPublicImage: jest.Mock };
 
   function farmerProfileReturns(profile: unknown) {
     farmerProfileModel.findOne.mockReturnValue({
@@ -119,10 +121,17 @@ describe('MarketplaceService', () => {
       endSession: jest.fn().mockResolvedValue(undefined),
     };
     configValues = {};
+    storage = {
+      validate: jest.fn(),
+      uploadPublicImage: jest.fn((_b: Buffer, folder: string) =>
+        Promise.resolve(`https://cdn.test/${folder}/${Math.random()}.jpg`),
+      ),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         MarketplaceService,
+        { provide: StorageService, useValue: storage },
         { provide: getModelToken(Product.name), useValue: model },
         {
           provide: getModelToken(BlockchainTransaction.name),
@@ -448,6 +457,34 @@ describe('MarketplaceService', () => {
       expect(result.data[1].originLedgerStatus).toBe('missing');
       // Farmer without a profile: null, not an invented placeholder.
       expect(result.data[2].farmer).toBeNull();
+    });
+  });
+
+  describe('uploadImages', () => {
+    const photo = () => ({ buffer: Buffer.from('jpeg') });
+
+    it('stores each photo under products/ and returns their URLs', async () => {
+      const result = await service.uploadImages([photo(), photo()]);
+      expect(result.urls).toHaveLength(2);
+      expect(storage.validate).toHaveBeenCalledTimes(2);
+      expect(storage.uploadPublicImage).toHaveBeenCalledWith(
+        expect.any(Buffer),
+        'products',
+      );
+    });
+
+    it('rejects empty, oversized and invalid uploads before storing anything', async () => {
+      await expect(service.uploadImages([])).rejects.toThrow(
+        /at least one photo/,
+      );
+      await expect(
+        service.uploadImages([1, 2, 3, 4, 5].map(photo)),
+      ).rejects.toThrow(/at most 4/);
+      storage.validate.mockImplementationOnce(() => {
+        throw new Error('Only JPEG, PNG or WebP images are accepted');
+      });
+      await expect(service.uploadImages([photo()])).rejects.toThrow(/JPEG/);
+      expect(storage.uploadPublicImage).not.toHaveBeenCalled();
     });
   });
 });
