@@ -36,6 +36,7 @@ jobs:
         env:
           CI: 'true'
         run: |
+          pnpm audit --prod --audit-level high
           pnpm exec jest --runInBand
           pnpm exec jest --config test/jest-e2e.json --runInBand
           node --test test/*.test.mjs
