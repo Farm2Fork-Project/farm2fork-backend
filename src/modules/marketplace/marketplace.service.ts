@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -14,6 +15,7 @@ import {
 } from 'mongoose';
 import * as QRCode from 'qrcode';
 import { UserRole } from '../../common/enums/user-role.enum';
+import { StorageService } from '../../infrastructure/storage/storage.service';
 import {
   FarmerProfile,
   FarmerProfileDocument,
@@ -36,6 +38,7 @@ import {
 } from './dto/product-response.dto';
 import {
   CreateProductDto,
+  ProductImagesResponseDto,
   ProductListResponseDto,
   ProductQrResponseDto,
   ProductResponseDto,
@@ -57,6 +60,7 @@ import {
  * blockchain outbox (master context 6.4) in the same transaction, so a
  * product never exists without the first link of its provenance chain.
  */
+export const MAX_PRODUCT_IMAGES = 4;
 export const LISTED_EVENT = 'listed';
 export const UNKNOWN_LOCATION = 'Location not provided';
 const DEFAULT_TRACE_ORIGIN = 'https://farm2fork.com';
@@ -90,7 +94,33 @@ export class MarketplaceService {
     @InjectConnection()
     private readonly connection: Connection,
     private readonly config: ConfigService,
+    private readonly storage: StorageService,
   ) {}
+
+  /** Stores listing photos and returns their public URLs for `images`. */
+  async uploadImages(
+    images: { buffer: Buffer }[] = [],
+  ): Promise<ProductImagesResponseDto> {
+    if (!Array.isArray(images) || images.length === 0) {
+      throw new BadRequestException('Attach at least one photo');
+    }
+    if (images.length > MAX_PRODUCT_IMAGES) {
+      throw new BadRequestException(
+        `Attach at most ${MAX_PRODUCT_IMAGES} photos`,
+      );
+    }
+    images.forEach((image) => {
+      if (!image || !(image.buffer instanceof Buffer)) {
+        throw new BadRequestException('Invalid image file');
+      }
+      this.storage.validate(image.buffer, 'image');
+    });
+    const urls: string[] = [];
+    for (const image of images) {
+      urls.push(await this.storage.uploadPublicImage(image.buffer, 'products'));
+    }
+    return { urls };
+  }
 
   async create(
     farmerId: string,
