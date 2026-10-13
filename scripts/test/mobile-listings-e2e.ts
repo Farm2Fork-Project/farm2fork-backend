@@ -19,6 +19,7 @@ import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { Model } from 'mongoose';
 import { MarketplaceController } from '../../src/modules/marketplace/marketplace.controller';
 import { MarketplaceService } from '../../src/modules/marketplace/marketplace.service';
+import { StorageService } from '../../src/infrastructure/storage/storage.service';
 import {
   Product,
   ProductSchema,
@@ -64,6 +65,7 @@ async function main() {
       controllers: [MarketplaceController],
       providers: [
         MarketplaceService,
+        StorageService,
         JwtStrategy,
         JwtAuthGuard,
         RolesGuard,
