@@ -114,6 +114,15 @@ def digest(path):
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
+def verify_provenance(path, bundle, component, sha):
+    repo = REPOS[component]
+    workflow = repo + '/.github/workflows/deploy.yml'
+    run(['gh', 'attestation', 'verify', path, '--bundle', bundle,
+         '--repo', repo, '--source-ref', 'refs/heads/main', '--source-digest', sha,
+         '--signer-workflow', workflow, '--deny-self-hosted-runners',
+         '--cert-identity', 'https://github.com/' + workflow + '@refs/heads/main'], timeout=120)
+
+
 def images():
     return dict(line.split('=', 1) for line in (ROOT / 'deployment-images.env').read_text().splitlines()
                 if '=' in line and not line.startswith('#'))
@@ -142,12 +151,14 @@ def wait_http(container, component, tries=45):
 
 
 def dependency_probe():
+    container = dc('ps', '-q', 'backend-worker', capture=True)
+    before = json.loads(run(['docker', 'inspect', container], capture=True))[0]
     dc('exec', '-T', '-e', 'BLOCKCHAIN_WORKER_ENABLED=false', '-e', 'FABRIC_READ_ENABLED=true',
        'backend-worker', 'node', '/ops/readiness.cjs', timeout=90)
     time.sleep(8)
-    container = dc('ps', '-q', 'backend-worker', capture=True)
     status = json.loads(run(['docker', 'inspect', container], capture=True))[0]
-    if not status['State']['Running'] or status['RestartCount']:
+    if (not status['State']['Running'] or status['RestartCount'] != before['RestartCount']
+            or status['State']['StartedAt'] != before['State']['StartedAt']):
         raise RuntimeError('Worker is not stable')
 
 
@@ -172,8 +183,8 @@ def deploy_image(component, manifest, artifact, prior):
         # Detect a newer merge before changing running services.
         if main_sha(component) != manifest['sha']:
             raise RuntimeError('Release superseded before activation')
-        dc('stop', component, *(['backend-worker'] if component == 'backend' else []))
         switched = True
+        dc('stop', component, *(['backend-worker'] if component == 'backend' else []))
         dc('up', '-d', '--no-deps', component, *(['backend-worker'] if component == 'backend' else []))
         container = dc('ps', '-q', component, capture=True)
         wait_http(container, component)
@@ -204,10 +215,13 @@ def deploy_blockchain(manifest, artifact, prior):
         return
     if not old.get('package') or not pathlib.Path(old['package']).is_file():
         raise RuntimeError('Previous chaincode package is required for forward recovery')
-    run(['bash', OPS / 'backup.sh', 'fabric'], timeout=240)
     atomic_json(STATE / 'transaction.json', {'component': 'blockchain', 'sha': manifest['sha'],
-                'old_chaincode': old})
+                'old_chaincode': old, 'phase': 'preparing'})
+    run(['bash', OPS / 'backup.sh', 'fabric'], timeout=240)
+    wait_fabric()
     dc('stop', 'backend-worker')
+    atomic_json(STATE / 'transaction.json', {'component': 'blockchain', 'sha': manifest['sha'],
+                'old_chaincode': old, 'phase': 'upgrading'})
     try:
         run(['bash', OPS / 'fabric-release.sh', 'deploy', artifact, manifest['sha']], timeout=600)
         dc('up', '-d', '--no-deps', 'backend-worker')
@@ -250,6 +264,11 @@ def process(component):
         if digest(artifact) != manifest['sha256']:
             artifact.unlink(missing_ok=True)
             raise ValueError('Artifact digest mismatch')
+        bundle = folder / 'attestation.json'
+        if not download(base + '/attestation.json', bundle, 5 * 1024**2):
+            raise RuntimeError('Signed provenance bundle missing')
+        verify_provenance(manifest_path, bundle, component, sha)
+        verify_provenance(artifact, bundle, component, sha)
         if main_sha(component) != sha:
             status['status'] = 'superseded'
             atomic_json(path, status)
@@ -271,9 +290,29 @@ def process(component):
         if status.get('recovery'):
             (STATE / 'transaction.json').unlink(missing_ok=True)
         print(f'Deployment failed for {component}: {error}', flush=True)
+        if (STATE / 'transaction.json').exists():
+            raise RuntimeError('Outstanding recovery must complete before another deployment') from error
+
+
+def wait_fabric():
+    for _ in range(20):
+        try:
+            run(['bash', OPS / 'fabric-release.sh', 'verify'], timeout=20)
+            return
+        except (RuntimeError, subprocess.TimeoutExpired):
+            time.sleep(2)
+    raise RuntimeError('Fabric not ready after restart')
 
 
 def recover_interrupted():
+    backup = STATE / 'backup-in-progress.json'
+    if backup.exists():
+        marker = read_json(backup)
+        run(['docker', 'start', 'orderer.farm2fork.com', 'peer0.farm2fork.com'])
+        wait_fabric()
+        if marker['worker_was_running'] and not (STATE / 'transaction.json').exists():
+            dc('up', '-d', '--no-deps', 'backend-worker')
+        backup.unlink()
     path = STATE / 'transaction.json'
     if not path.exists():
         return
@@ -287,8 +326,11 @@ def recover_interrupted():
     print('Recovering interrupted ' + component + ' deployment', flush=True)
     if component == 'blockchain':
         old = transaction['old_chaincode']
+        run(['docker', 'start', 'orderer.farm2fork.com', 'peer0.farm2fork.com'])
+        wait_fabric()
         dc('stop', 'backend-worker')
-        run(['bash', OPS / 'fabric-release.sh', 'deploy', old['package'], old['sha']], timeout=600)
+        if transaction.get('phase') != 'preparing':
+            run(['bash', OPS / 'fabric-release.sh', 'deploy', old['package'], old['sha']], timeout=600)
         atomic_json(STATE / 'chaincode-current.json', old)
         dc('up', '-d', '--no-deps', 'backend-worker')
     else:
@@ -318,6 +360,8 @@ def main():
                 process(component)
             except Exception as error:
                 print(f'Poll failed for {component}: {type(error).__name__}', flush=True)
+                if (STATE / 'transaction.json').exists():
+                    raise
 
 
 if __name__ == '__main__':

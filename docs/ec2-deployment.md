@@ -2,7 +2,7 @@
 
 Merge a pull request into **main** to deploy. All three repositories have `CI and EC2 deployment` workflows: Tests → Publish immutable release → Verify EC2 activation. The final job succeeds only after EC2 reports the exact source SHA activated and checked. PR jobs have no production credentials. The main-only production environment governs publication.
 
-GitHub-hosted runners build Docker images for backend and AI. Backend API and worker always use the same image SHA. Blockchain CI builds a Fabric 3.1.4 package; EC2 upgrades only when the chaincode source hash changes. No PM2 is needed: Docker restart policies handle containers and systemd handles the outbound release agent. EC2 never executes PR workflows. Runtime `.env`, Firebase credentials, client identity, TLS certificates and trained model weights stay on EC2.
+GitHub-hosted runners build Docker images for backend and AI. Backend API and worker always use the same image SHA. Blockchain CI builds a Fabric 3.1.4 package; EC2 upgrades only when the chaincode source hash changes. Both the manifest and artifact carry signed GitHub provenance: EC2 verifies the exact main source SHA, repository, signer workflow and certificate identity, and rejects self-hosted runner attestations before loading an image or installing chaincode. No PM2 is needed: Docker restart policies handle containers and systemd handles the outbound release agent. EC2 never executes PR workflows. Runtime `.env`, Firebase credentials, client identity, TLS certificates and trained model weights stay on EC2.
 
 ## Daily operation
 
