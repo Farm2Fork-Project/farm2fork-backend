@@ -1,0 +1,129 @@
+name: farm2fork
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-fabric-env: &fabric-env
+  FABRIC_TLS_ROOT_CERT_PATH: /fabric/peer-ca.crt
+  FABRIC_IDENTITY_CERT_PATH: /fabric/identity/signcerts/User1@farm2fork.com-cert.pem
+  FABRIC_IDENTITY_KEY_PATH: /fabric/identity/keystore/priv_sk
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - /opt/farm2fork/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /opt/farm2fork/caddy/certs:/etc/caddy/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [app]
+    logging: *logging
+
+  backend:
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE required}
+    restart: unless-stopped
+    env_file: [/opt/farm2fork/backend.env]
+    environment:
+      <<: *fabric-env
+      BLOCKCHAIN_WORKER_ENABLED: "false"
+      FABRIC_READ_ENABLED: "true"
+    volumes:
+      - /opt/farm2fork/secrets/firebase.json:/run/secrets/firebase.json:ro
+      - /opt/farm2fork/farm2fork-blockchain/network/organizations/peerOrganizations/farm2fork.com/users/User1@farm2fork.com/msp:/fabric/identity:ro
+      - /opt/farm2fork/farm2fork-blockchain/network/organizations/peerOrganizations/farm2fork.com/peers/peer0.farm2fork.com/tls/ca.crt:/fabric/peer-ca.crt:ro
+      - /opt/farm2fork/ops:/ops:ro
+      - uploads:/app/uploads
+    networks: [app, fabric]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health',{signal:AbortSignal.timeout(5000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 8s
+      start_period: 60s
+      retries: 3
+    stop_grace_period: 30s
+    logging: *logging
+
+  backend-worker:
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE required}
+    restart: unless-stopped
+    command: ["node", "dist/worker"]
+    env_file: [/opt/farm2fork/backend.env]
+    environment:
+      <<: *fabric-env
+      BLOCKCHAIN_WORKER_ENABLED: "true"
+      FABRIC_READ_ENABLED: "false"
+    volumes:
+      - /opt/farm2fork/secrets/firebase.json:/run/secrets/firebase.json:ro
+      - /opt/farm2fork/farm2fork-blockchain/network/organizations/peerOrganizations/farm2fork.com/users/User1@farm2fork.com/msp:/fabric/identity:ro
+      - /opt/farm2fork/farm2fork-blockchain/network/organizations/peerOrganizations/farm2fork.com/peers/peer0.farm2fork.com/tls/ca.crt:/fabric/peer-ca.crt:ro
+      - /opt/farm2fork/ops:/ops:ro
+      - uploads:/app/uploads
+    networks: [app, fabric]
+    stop_grace_period: 30s
+    logging: *logging
+
+  ai:
+    image: ${AI_IMAGE:?AI_IMAGE required}
+    restart: unless-stopped
+    environment:
+      AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:?AI_SERVICE_TOKEN required}
+      ALLOW_UNTRAINED_MODEL: "false"
+      AI_REQUIRE_TRAINED: ${AI_REQUIRE_TRAINED:-false}
+      MODEL_CHECKPOINT: /app/models/checkpoints/grade_cond_dedup/best_model.pth
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+    volumes:
+      - /opt/farm2fork/models:/app/models/checkpoints/grade_cond_dedup:ro
+      - /opt/farm2fork/ops/ai-probe.py:/ops/ai-probe.py:ro
+    networks: [app]
+    healthcheck:
+      test: ["CMD", "python", "/ops/ai-probe.py"]
+      interval: 30s
+      timeout: 20s
+      start_period: 60s
+      retries: 3
+    logging: *logging
+
+  redis:
+    image: redis:8.6.3-alpine3.23
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: ["redis_data:/data"]
+    networks: [app]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *logging
+
+  deployment-status:
+    image: python:3.11-slim
+    restart: unless-stopped
+    user: "65534:65534"
+    command: ["python", "-B", "/app/status-server.py"]
+    volumes:
+      - /opt/farm2fork/ops/status-server.py:/app/status-server.py:ro
+      - /opt/farm2fork/deployment-state:/state:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [app]
+    logging: *logging
+
+networks:
+  app:
+  fabric:
+    external: true
+    name: farm2fork-fabric
+
+volumes:
+  redis_data:
+  uploads:
+  caddy_data:
+  caddy_config:

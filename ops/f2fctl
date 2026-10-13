@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT=/opt/farm2fork
+dc() { docker compose --env-file "$ROOT/backend.env" --env-file "$ROOT/deployment-images.env" -f "$ROOT/ops/compose.yml" "$@"; }
+case ${1:-status} in
+  status) dc ps; systemctl list-timers farm2fork-deploy.timer --no-pager ;;
+  logs) journalctl -u farm2fork-deploy.service -n 80 --no-pager ;;
+  check)
+    dc exec -T -e BLOCKCHAIN_WORKER_ENABLED=false -e FABRIC_READ_ENABLED=true backend-worker node /ops/readiness.cjs
+    dc exec -T ai python /ops/ai-probe.py
+    curl --fail --silent --show-error https://api.farm2fork.tech/api/health
+    ;;
+  backup)
+    flock "$ROOT/.deployment.lock" bash "$ROOT/ops/backup.sh" fabric
+    ;;
+  retry)
+    component=${2:?backend, ai or blockchain required}
+    [[ "$component" =~ ^(backend|ai|blockchain)$ ]] || exit 2
+    flock "$ROOT/.deployment.lock" python3 - "$component" <<'PY'
+import pathlib,json,sys
+path=pathlib.Path('/opt/farm2fork/deployment-state')/(sys.argv[1]+'.json')
+state=json.loads(path.read_text())
+assert state['status'] in ('failed','rolled_back'), 'Only failed releases can be retried'
+state['status']='retry_requested'
+temp=path.with_suffix('.tmp')
+temp.write_text(json.dumps(state))
+temp.chmod(0o644)
+temp.replace(path)
+PY
+    systemctl start --no-block farm2fork-deploy.service
+    ;;
+  *) echo 'Usage: sudo f2fctl status|logs|check|backup|retry COMPONENT' >&2; exit 2 ;;
+esac

@@ -1,0 +1,24 @@
+{
+    servers {
+        # Replace this placeholder with Cloudflare's current published CIDRs.
+        trusted_proxies static CLOUDFLARE_CIDRS
+        trusted_proxies_strict
+        client_ip_headers CF-Connecting-IP
+    }
+}
+
+api.farm2fork.tech {
+    tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin.key
+    encode zstd gzip
+
+    handle /_deploy/status/* {
+        header Cache-Control "no-store, max-age=0"
+        reverse_proxy deployment-status:9010
+    }
+
+    handle {
+        reverse_proxy backend:3000 {
+            header_up X-Forwarded-For {client_ip}
+        }
+    }
+}
