@@ -30,8 +30,8 @@ export const safepayConfig = registerAs('safepay', (): ISafepayConfig => {
     checkoutBaseUrl:
       process.env.SAFEPAY_CHECKOUT_BASE_URL ??
       (isProduction
-        ? 'https://getsafepay.com/checkout'
-        : 'https://sandbox.api.getsafepay.com/checkout'),
+        ? 'https://getsafepay.com/embedded'
+        : 'https://sandbox.api.getsafepay.com/embedded'),
     publicKey: process.env.SAFEPAY_PUBLIC_KEY,
     secretKey: process.env.SAFEPAY_SECRET_KEY,
     webhookSecret: process.env.SAFEPAY_WEBHOOK_SECRET,

@@ -15,7 +15,6 @@ export interface SafepayTracker {
 export interface SafepayCheckoutUrlParams {
   trackerToken: string;
   authToken: string;
-  orderId: string;
   redirectUrl: string;
   cancelUrl: string;
 }
@@ -96,32 +95,28 @@ export class SafepayClient {
   }
 
   /**
-   * Builds the hosted Checkout URL. Safepay's current Express Checkout guide
-   * names its params `tracker`/`tbt`; the only published, runnable reference
-   * (@sfpy/node-sdk, an older v1-era build) instead emits `beacon` with no
-   * `tbt` at all. Both are included below - extra query params are ignored
-   * by web servers, so this is a safe hedge until confirmed against a real
-   * sandbox checkout load (see the follow-up we flagged for this).
+   * Builds the hosted Checkout URL for a v3 tracker, the way Safepay's
+   * current SDK (@sfpy/node-core `checkout.createCheckoutUrl`) does:
+   * `<host>/embedded/?environment=&tracker=&tbt=&source=hosted&redirect_url=&cancel_url=`.
+   * The legacy `/checkout/pay?beacon=` page only understands v1 trackers and
+   * rejects a v3 tracker with "Tracker is in an invalid state".
    */
   buildCheckoutUrl(params: SafepayCheckoutUrlParams): string {
     const query = new URLSearchParams({
-      beacon: params.trackerToken,
+      environment: this.config.environment,
       tracker: params.trackerToken,
       tbt: params.authToken,
-      order_id: params.orderId,
+      source: 'hosted',
       redirect_url: params.redirectUrl,
       cancel_url: params.cancelUrl,
-      env: this.config.environment,
-      source: 'hosted',
-      webhooks: 'true',
     });
-    return `${this.config.checkoutBaseUrl}/pay?${query.toString()}`;
+    return `${this.config.checkoutBaseUrl.replace(/\/+$/, '')}/?${query.toString()}`;
   }
 
   /** Fallback reconciliation: fetch a tracker's current state directly. */
   async fetchPayment(trackerToken: string): Promise<unknown> {
     const secretKey = this.requireConfig('secretKey', 'SAFEPAY_SECRET_KEY');
-    return this.request(`/reporter/api/v2/payments/${trackerToken}`, {
+    return this.request(`/reporter/api/v1/payments/${trackerToken}`, {
       method: 'GET',
       headers: { 'X-SFPY-MERCHANT-SECRET': secretKey },
     });
