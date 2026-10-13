@@ -23,6 +23,7 @@ import {
 } from '../src/modules/blockchain/schemas/blockchain-transaction.schema';
 import { FABRIC_GATEWAY_CLIENT } from '../src/modules/blockchain/interfaces/fabric-gateway-client.interface';
 import { MarketplaceService } from '../src/modules/marketplace/marketplace.service';
+import { StorageService } from '../src/infrastructure/storage/storage.service';
 import {
   Product,
   ProductDocument,
@@ -84,6 +85,7 @@ describe('Product provenance: listing -> payment -> shipment -> public trace', (
       ],
       providers: [
         MarketplaceService,
+        StorageService,
         TransportService,
         TraceabilityService,
         {

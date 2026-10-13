@@ -29,6 +29,7 @@ import { RolesGuard } from '../../src/common/guards/roles.guard';
 import { CsrfGuard } from '../../src/common/guards/csrf.guard';
 import { MarketplaceController } from '../../src/modules/marketplace/marketplace.controller';
 import { MarketplaceService } from '../../src/modules/marketplace/marketplace.service';
+import { StorageService } from '../../src/infrastructure/storage/storage.service';
 import {
   FarmerProfile,
   FarmerProfileSchema,
@@ -166,6 +167,7 @@ async function main() {
       providers: [
         FarmerProfileService,
         MarketplaceService,
+        StorageService,
         OrderService,
         NotificationService,
         { provide: FIREBASE_APP, useValue: null },
