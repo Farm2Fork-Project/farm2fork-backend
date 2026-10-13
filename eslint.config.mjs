@@ -29,6 +29,12 @@ export default tseslint.config(
             '@typescript-eslint/no-explicit-any': 'error',
             '@typescript-eslint/no-floating-promises': 'warn',
             '@typescript-eslint/no-unsafe-argument': 'warn',
+            // Allow intentionally-unused placeholders (e.g. _farmerId reserved
+            // for a future ownership check) via the conventional underscore.
+            '@typescript-eslint/no-unused-vars': [
+                'error',
+                { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+            ],
             "prettier/prettier": ["error", { endOfLine: "auto" }],
         },
     },

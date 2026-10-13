@@ -1,15 +1,24 @@
-import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
+import { afterEach, beforeEach, describe, it } from '@jest/globals';
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import { AppController } from '../src/app.controller';
-import { AppModule } from './../src/app.module';
+import { AppService } from '../src/app.service';
+import { ConfigService } from '@nestjs/config';
+import request from 'supertest';
 
 describe('AppController (e2e)', () => {
   let app: INestApplication;
 
   beforeEach(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
+      controllers: [AppController],
+      providers: [
+        AppService,
+        {
+          provide: ConfigService,
+          useValue: new ConfigService({ API_VERSION: 'v1' }),
+        },
+      ],
     }).compile();
 
     app = moduleFixture.createNestApplication();
@@ -17,14 +26,21 @@ describe('AppController (e2e)', () => {
   });
 
   afterEach(async () => {
-    await app.close();
+    if (app) await app.close();
   });
 
-  it('/health (GET)', () => {
-    const appController = app.get(AppController);
-    const result = appController.health();
-
-    expect(result.status).toBe('ok');
-    expect(result).toHaveProperty('timestamp');
+  it('/health (GET)', async () => {
+    await request(app.getHttpServer())
+      .get('/health')
+      .expect(200)
+      .expect(({ body }) => {
+        if (
+          body.status !== 'ok' ||
+          body.version !== 'v1' ||
+          Number.isNaN(Date.parse(body.timestamp))
+        ) {
+          throw new Error('Invalid health response');
+        }
+      });
   });
 });

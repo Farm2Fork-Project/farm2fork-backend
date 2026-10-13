@@ -1,10 +1,13 @@
 FROM node:24.16.0-alpine3.23 AS base
 WORKDIR /app
+RUN apk add --no-cache python3 make g++
 RUN corepack enable
 
 FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=farm2fork-corepack,target=/root/.cache/node/corepack \
+    --mount=type=cache,id=farm2fork-pnpm-store,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
 
 FROM deps AS build
 COPY . .
@@ -12,12 +15,27 @@ RUN rm -f tsconfig.build.tsbuildinfo && pnpm build
 
 FROM base AS prod-deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile --prod
+RUN --mount=type=cache,id=farm2fork-corepack,target=/root/.cache/node/corepack \
+    --mount=type=cache,id=farm2fork-pnpm-store,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile --prod
 
 FROM deps AS development
 COPY . .
 EXPOSE 3000
 CMD ["pnpm", "start:dev"]
+
+FROM node:24.16.0-bookworm-slim AS test
+WORKDIR /app
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends python3 make g++ libcurl4 \
+    && rm -rf /var/lib/apt/lists/* \
+    && corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN --mount=type=cache,id=farm2fork-corepack,target=/root/.cache/node/corepack \
+    --mount=type=cache,id=farm2fork-pnpm-store,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
+COPY . .
+CMD ["pnpm", "test:e2e", "--", "--runInBand"]
 
 FROM node:24.16.0-alpine3.23 AS production
 WORKDIR /app

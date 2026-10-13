@@ -25,6 +25,14 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+## Testing the whole flow locally
+
+`docker compose -f docker-compose.local.yml up --build` starts MongoDB, Redis,
+the API, the AI service and the web app together; `pnpm seed:demo` and
+`pnpm smoke:flow` then seed listings and check the flow end to end. See
+[docs/TESTING.md](docs/TESTING.md) for Firebase setup, the mobile app and a
+per-role test script.
+
 ## Project setup
 
 ```bash
@@ -55,6 +63,19 @@ $ pnpm run test:e2e
 
 # test coverage
 $ pnpm run test:cov
+```
+
+## Docker E2E tests on Apple Silicon
+
+The application containers remain Alpine-based. The E2E suite uses
+`mongodb-memory-server`, whose Debian 12 Community Server binary is x86_64-only.
+On Apple Silicon, run the dedicated Debian test target through Docker's amd64
+emulation instead of changing the production image:
+
+```bash
+$ docker build --platform linux/amd64 --target test -t farm2fork-backend-e2e-test .
+$ docker run --rm --platform linux/amd64 farm2fork-backend-e2e-test \
+  pnpm test:e2e -- payment.e2e-spec.ts shipment.e2e-spec.ts --runInBand
 ```
 
 ## Deployment

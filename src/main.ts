@@ -5,11 +5,14 @@ import {
   BadRequestException,
   ValidationError,
 } from '@nestjs/common';
-import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import { SwaggerModule } from '@nestjs/swagger';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
+import { createSwaggerDocument } from './swagger-document';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const configService = app.get(ConfigService);
 
   // Get configuration values
@@ -19,19 +22,39 @@ async function bootstrap() {
   const swaggerEnabled = configService.get<boolean>('SWAGGER_ENABLED', true);
   const swaggerPath = configService.get<string>('SWAGGER_PATH', 'api/docs');
   const nodeEnv = configService.get<string>('NODE_ENV', 'development');
-  const corsOrigin = configService.get<string>('CORS_ORIGIN', '*');
+  const corsOrigin = configService.get<string>('CORS_ORIGIN', '');
+  const trustProxy = configService.get<string>('TRUST_PROXY');
+
+  // Behind nginx every request would otherwise share the proxy's IP and the
+  // per-IP rate limits would throttle all users together.
+  if (trustProxy) {
+    const hops = Number(trustProxy);
+    app.set('trust proxy', Number.isInteger(hops) ? hops : trustProxy);
+  }
 
   // Set API prefix
   app.setGlobalPrefix(apiPrefix);
 
-  // Enable CORS
+  // Parse cookies so the Firebase web session cookie is available to guards.
+  app.use(cookieParser());
+
+  // Credentialed CORS is required for the HTTP-only web session cookie, and a
+  // wildcard origin is invalid when credentials are enabled. Fail fast on '*'.
+  const allowedOrigins = corsOrigin
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (allowedOrigins.length === 0 || allowedOrigins.includes('*')) {
+    throw new Error(
+      'CORS_ORIGIN must be an explicit comma-separated origin list (not "*") ' +
+        'because credentialed web sessions are enabled.',
+    );
+  }
   app.enableCors({
-    origin:
-      corsOrigin === '*'
-        ? true
-        : corsOrigin.split(',').map((item) => item.trim()),
+    origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Farm2Fork-CSRF'],
   });
 
   // Global validation pipe
@@ -62,27 +85,7 @@ async function bootstrap() {
 
   // Swagger setup
   if (swaggerEnabled) {
-    const config = new DocumentBuilder()
-      .setTitle('Farm2Fork API')
-      .setDescription(
-        'Farm2Fork API Documentation - Quality produce direct from farms',
-      )
-      .setVersion(apiVersion)
-      .addBearerAuth(
-        {
-          type: 'http',
-          scheme: 'bearer',
-          bearerFormat: 'JWT',
-          description: 'Enter JWT token',
-        },
-        'JWT-auth',
-      )
-      .addServer(`http://localhost:${port}`, 'Local Development')
-      .addServer(`https://api.farm2fork.com`, 'Production')
-      .addTag('Health', 'Application health check endpoints')
-      .build();
-
-    const document = SwaggerModule.createDocument(app, config);
+    const document = createSwaggerDocument(app, port, apiVersion);
 
     SwaggerModule.setup(swaggerPath, app, document, {
       swaggerOptions: {

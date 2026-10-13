@@ -1,0 +1,16 @@
+[Unit]
+Description=Consume tested Farm2Fork main release artifacts
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/farm2fork
+ExecStart=/usr/bin/python3 /opt/farm2fork/ops/deploy-agent.py
+TimeoutStartSec=45min
+Nice=10
+UMask=0077
+StandardOutput=journal
+StandardError=journal
