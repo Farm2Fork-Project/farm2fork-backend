@@ -102,9 +102,16 @@ async function main() {
     amount: number;
     metadata: { order_id: string };
   }> = [];
+  // Hosted checkout URLs carry only the tracker, so the fixture remembers
+  // which order each tracker was created for.
+  const trackerOrders: Record<string, string> = {};
   const gateway = createServer((req, res) => {
     void (async () => {
       res.setHeader('Content-Type', 'application/json');
+      if (req.method === 'GET' && req.url === '/__trackers') {
+        res.end(JSON.stringify(trackerOrders));
+        return;
+      }
       if (req.method !== 'POST') {
         res.writeHead(405).end('{}');
         return;
@@ -112,14 +119,13 @@ async function main() {
       if (req.url === '/order/payments/v3/') {
         let body = '';
         for await (const chunk of req) body += String(chunk);
-        trackerRequests.push(
-          JSON.parse(body) as (typeof trackerRequests)[number],
-        );
+        const request = JSON.parse(body) as (typeof trackerRequests)[number];
+        trackerRequests.push(request);
+        const token = randomUUID();
+        trackerOrders[token] = request.metadata.order_id;
         res.end(
           JSON.stringify({
-            data: {
-              tracker: { token: randomUUID(), state: 'TRACKER_INITIATED' },
-            },
+            data: { tracker: { token, state: 'TRACKER_STARTED' } },
           }),
         );
       } else if (req.url === '/client/passport/v1/token') {
@@ -188,7 +194,7 @@ async function main() {
               enabled: true,
               environment: 'sandbox',
               apiBaseUrl: gatewayUrl,
-              checkoutBaseUrl: 'https://sandbox.api.getsafepay.com/checkout',
+              checkoutBaseUrl: 'https://sandbox.api.getsafepay.com/embedded',
               publicKey: 'test-public-key',
               secretKey: 'test-secret-key',
               webhookSecret,
@@ -303,6 +309,7 @@ async function main() {
     const exitCode = await new Promise<number>((done, reject) => {
       const fixtureEnv = {
         CHECKOUT_TEST_API: apiUrl,
+        CHECKOUT_TEST_GATEWAY: gatewayUrl,
         CHECKOUT_TEST_DELIVERY: delivery ? 'true' : 'false',
         CHECKOUT_TEST_TRANSPORTER_ID: transporters[0]._id.toHexString(),
         CHECKOUT_TEST_TRANSPORTER_TOKEN: token(transporters[0]),

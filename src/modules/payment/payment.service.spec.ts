@@ -359,7 +359,7 @@ describe('PaymentService', () => {
     });
     safepayClient.getAuthToken.mockResolvedValue('tbt_abc');
     safepayClient.buildCheckoutUrl.mockReturnValue(
-      'https://sandbox.api.getsafepay.com/checkout/pay?beacon=track_123',
+      'https://sandbox.api.getsafepay.com/embedded/?tracker=track_123',
     );
 
     const result = await service.initiate(buyerId, {
@@ -373,7 +373,7 @@ describe('PaymentService', () => {
       orderId: order._id.toHexString(),
     });
     expect(result.checkoutUrl).toBe(
-      'https://sandbox.api.getsafepay.com/checkout/pay?beacon=track_123',
+      'https://sandbox.api.getsafepay.com/embedded/?tracker=track_123',
     );
     expect(paymentModel.create).toHaveBeenCalledWith(
       expect.objectContaining({ gatewayRef: 'track_123' }),
