@@ -24,6 +24,11 @@ if component == 'blockchain':
 else:
     manifest['image'] = f'farm2fork-{component}:{sha}'
 pathlib.Path('manifest.json').write_text(json.dumps(manifest, sort_keys=True) + '\n')
+if '--prepare' in sys.argv:
+    sys.exit(0)
+bundle = pathlib.Path('attestation.json')
+if not bundle.is_file():
+    raise SystemExit('Signed provenance bundle is required before publication')
 existing = subprocess.run(['gh', 'release', 'view', tag, '--json', 'isDraft'], capture_output=True, text=True)
 if existing.returncode == 0:
     if not json.loads(existing.stdout)['isDraft']:
@@ -34,5 +39,5 @@ if existing.returncode == 0:
 subprocess.run(['gh', 'release', 'create', tag, '--target', sha, '--draft',
                 '--title', component + ' ' + sha[:12], '--notes',
                 'Tested deployment artifact for source commit ' + sha,
-                str(artifact), 'manifest.json'], check=True)
+                str(artifact), 'manifest.json', str(bundle)], check=True)
 subprocess.run(['gh', 'release', 'edit', tag, '--draft=false'], check=True)

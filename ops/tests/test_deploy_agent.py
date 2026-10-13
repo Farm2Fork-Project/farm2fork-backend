@@ -93,6 +93,73 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(agent.read_json(state / 'ai.json')['status'], 'rolled_back')
             self.assertFalse((state / 'transaction.json').exists())
 
+    def test_partial_stop_failure_still_restores_running_services(self):
+        calls = []
+        def compose(*args, **kwargs):
+            calls.append(args)
+            if args[0] == 'stop':
+                raise RuntimeError('partial stop timeout')
+            return 'running'
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(agent, 'STATE', pathlib.Path(folder)), \
+                mock.patch.object(agent, 'images', return_value={'BACKEND_IMAGE': 'old', 'AI_IMAGE': 'ai'}), \
+                mock.patch.object(agent, 'write_images'), mock.patch.object(agent, 'run', return_value=''), \
+                mock.patch.object(agent, 'dc', side_effect=compose), \
+                mock.patch.object(agent, 'main_sha', return_value='a' * 40), \
+                mock.patch.object(agent, 'dependency_probe') as probe, mock.patch.object(agent, 'wait_http'), \
+                mock.patch.object(agent.shutil, 'disk_usage', return_value=mock.Mock(free=10 * 1024**3)):
+            state = {}
+            with self.assertRaises(RuntimeError):
+                agent.deploy_image('backend', self.manifest(), pathlib.Path(folder) / 'image.tar.gz', state)
+            self.assertIn(('up', '-d', '--no-deps', 'backend', 'backend-worker'), calls)
+            probe.assert_called_once()
+            self.assertIn('restored', state['recovery'])
+
+    def test_main_aborts_before_next_component_when_recovery_is_outstanding(self):
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(agent, 'ROOT', pathlib.Path(folder)), \
+                mock.patch.object(agent, 'STATE', pathlib.Path(folder)), \
+                mock.patch.object(agent, 'recover_interrupted'), mock.patch.object(agent.sys, 'argv', ['agent']):
+            agent.atomic_json(pathlib.Path(folder) / 'transaction.json', {'component': 'blockchain'})
+            with mock.patch.object(agent, 'process', side_effect=RuntimeError('rollback failed')) as process:
+                with self.assertRaises(RuntimeError):
+                    agent.main()
+                process.assert_called_once_with('blockchain')
+
+    def test_existing_worker_restart_does_not_fail_a_stable_probe(self):
+        snapshot = json.dumps([{'State': {'Running': True, 'StartedAt': 'unchanged'}, 'RestartCount': 1}])
+        with mock.patch.object(agent, 'dc', return_value='worker'), \
+                mock.patch.object(agent, 'run', return_value=snapshot), mock.patch.object(agent.time, 'sleep'):
+            agent.dependency_probe()
+
+    def test_worker_restart_during_probe_fails(self):
+        before = json.dumps([{'State': {'Running': True, 'StartedAt': 'first'}, 'RestartCount': 0}])
+        after = json.dumps([{'State': {'Running': True, 'StartedAt': 'second'}, 'RestartCount': 1}])
+        with mock.patch.object(agent, 'dc', return_value='worker'), \
+                mock.patch.object(agent, 'run', side_effect=[before, after]), mock.patch.object(agent.time, 'sleep'):
+            with self.assertRaises(RuntimeError):
+                agent.dependency_probe()
+
+    def test_backup_failure_has_recovery_journal_before_stopping_fabric(self):
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(agent, 'STATE', pathlib.Path(folder)):
+            package = pathlib.Path(folder) / 'old.tar.gz'
+            package.touch()
+            agent.atomic_json(pathlib.Path(folder) / 'chaincode-current.json', {'source_hash': 'old',
+                              'package': str(package), 'sha': 'b' * 40})
+            def backup(*args, **kwargs):
+                self.assertTrue((pathlib.Path(folder) / 'transaction.json').exists())
+                raise RuntimeError('snapshot interrupted')
+            with mock.patch.object(agent, 'run', side_effect=backup), self.assertRaises(RuntimeError):
+                agent.deploy_blockchain({'source_hash': 'new', 'sha': 'a' * 40}, pathlib.Path('new'), {})
+
+    def test_provenance_verification_enforces_exact_main_workflow_and_sha(self):
+        with mock.patch.object(agent, 'run') as run:
+            agent.verify_provenance(pathlib.Path('artifact'), pathlib.Path('bundle'), 'ai', 'a' * 40)
+            args = run.call_args.args[0]
+            self.assertIn('--deny-self-hosted-runners', args)
+            self.assertEqual(args[args.index('--source-digest') + 1], 'a' * 40)
+            self.assertEqual(args[args.index('--source-ref') + 1], 'refs/heads/main')
+            self.assertEqual(args[args.index('--cert-identity') + 1],
+                             'https://github.com/Farm2Fork-Project/farm2fork-ai/.github/workflows/deploy.yml@refs/heads/main')
+
 
 if __name__ == '__main__':
     unittest.main()

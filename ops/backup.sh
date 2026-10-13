@@ -13,9 +13,18 @@ dc() { docker compose --env-file "$ROOT/backend.env" --env-file "$ROOT/deploymen
 docker image inspect alpine:3.23 >/dev/null 2>&1 || docker pull alpine:3.23 >/dev/null
 test "$(df --output=avail -B1 "$ROOT" | tail -1)" -gt 4294967296
 worker_was_running=$(dc ps -q backend-worker)
+WORKER_WAS_RUNNING="$worker_was_running" python3 - "$ROOT/deployment-state/backup-in-progress.json" <<'PY'
+import os,pathlib,json,sys
+path=pathlib.Path(sys.argv[1])
+temp=path.with_suffix('.tmp')
+temp.write_text(json.dumps({'worker_was_running':bool(os.environ['WORKER_WAS_RUNNING'])}))
+temp.chmod(0o644)
+temp.replace(path)
+PY
 recover() {
   docker start orderer.farm2fork.com peer0.farm2fork.com >/dev/null
   if [[ -n "$worker_was_running" ]]; then dc up -d --no-deps backend-worker >/dev/null; fi
+  rm -f "$ROOT/deployment-state/backup-in-progress.json"
 }
 trap recover EXIT
 dc stop backend-worker >/dev/null
