@@ -4,6 +4,27 @@ set -euo pipefail
 ROOT=${F2F_ROOT:-/opt/farm2fork}
 source "$ROOT/farm2fork-blockchain/network/scripts/env.sh"
 
+retry_lifecycle() {
+  local attempt output
+  output=$(mktemp)
+  for attempt in $(seq 1 12); do
+    if "$@" >"$output" 2>&1; then
+      cat "$output"
+      rm -f "$output"
+      return 0
+    fi
+    if ! grep -Eqi 'SERVICE_UNAVAILABLE|no Raft leader|UNAVAILABLE|connection refused|context deadline exceeded|timed out' "$output"; then
+      cat "$output" >&2
+      rm -f "$output"
+      return 1
+    fi
+    sleep 3
+  done
+  cat "$output" >&2
+  rm -f "$output"
+  return 1
+}
+
 ready() {
   peer_cmd peer channel getinfo -c "$CHANNEL_NAME" >/dev/null
   peer_cmd peer lifecycle chaincode querycommitted -C "$CHANNEL_NAME" -n "$CHAINCODE_NAME" --output json >/dev/null
@@ -32,7 +53,7 @@ case ${1:-} in
     if ! PACKAGE_ID="$package_id" python3 -c 'import json,sys,os; sys.exit(0 if any(p["package_id"]==os.environ["PACKAGE_ID"] for p in json.load(sys.stdin)["installed_chaincodes"]) else 1)' <<< "$installed"; then
       peer_cmd peer lifecycle chaincode install /tmp/farm2fork-release.tar.gz
     fi
-    peer_cmd peer lifecycle chaincode approveformyorg \
+    retry_lifecycle peer_cmd peer lifecycle chaincode approveformyorg \
       -o "$ORDERER_ADDRESS" -C "$CHANNEL_NAME" -n "$CHAINCODE_NAME" \
       --version "$version" --sequence "$sequence" --package-id "$package_id" \
       --tls --cafile "$ORDERER_CA_FILE"
@@ -40,11 +61,19 @@ case ${1:-} in
       -C "$CHANNEL_NAME" -n "$CHAINCODE_NAME" --version "$version" \
       --sequence "$sequence" --output json)
     python3 -c 'import json,sys; assert json.load(sys.stdin)["approvals"]["Farm2ForkMSP"] is True' <<< "$ready"
-    peer_cmd peer lifecycle chaincode commit \
-      -o "$ORDERER_ADDRESS" -C "$CHANNEL_NAME" -n "$CHAINCODE_NAME" \
-      --version "$version" --sequence "$sequence" \
-      --peerAddresses peer0.farm2fork.com:7051 --tlsRootCertFiles "$PEER_TLS_CA_FILE" \
-      --tls --cafile "$ORDERER_CA_FILE" --waitForEvent --waitForEventTimeout 60s
+    commit_definition() {
+      local definition
+      definition=$(peer_cmd peer lifecycle chaincode querycommitted -C "$CHANNEL_NAME" -n "$CHAINCODE_NAME" --output json)
+      if VERSION="$version" SEQUENCE="$sequence" python3 -c 'import json,sys,os; d=json.load(sys.stdin); sys.exit(0 if d["version"]==os.environ["VERSION"] and d["sequence"]==int(os.environ["SEQUENCE"]) else 1)' <<< "$definition"; then
+        return 0
+      fi
+      peer_cmd peer lifecycle chaincode commit \
+        -o "$ORDERER_ADDRESS" -C "$CHANNEL_NAME" -n "$CHAINCODE_NAME" \
+        --version "$version" --sequence "$sequence" \
+        --peerAddresses peer0.farm2fork.com:7051 --tlsRootCertFiles "$PEER_TLS_CA_FILE" \
+        --tls --cafile "$ORDERER_CA_FILE" --waitForEvent --waitForEventTimeout 60s
+    }
+    retry_lifecycle commit_definition
     committed=$(peer_cmd peer lifecycle chaincode querycommitted -C "$CHANNEL_NAME" -n "$CHAINCODE_NAME" --output json)
     VERSION="$version" SEQUENCE="$sequence" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["version"]==os.environ["VERSION"] and d["sequence"]==int(os.environ["SEQUENCE"])' <<< "$committed"
     verify
