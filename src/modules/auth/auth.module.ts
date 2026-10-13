@@ -4,6 +4,8 @@ import { JwtModule } from '@nestjs/jwt';
 import type { JwtSignOptions } from '@nestjs/jwt';
 import { MongooseModule } from '@nestjs/mongoose';
 import { PassportModule } from '@nestjs/passport';
+import { AccountController } from './account.controller';
+import { AccountService } from './account.service';
 import { AuthController } from './auth.controller';
 import {
   FarmerProfileController,
@@ -29,6 +31,7 @@ import {
   TransporterProfileSchema,
 } from './schemas/transporter-profile.schema';
 import { User, UserSchema } from './schemas/user.schema';
+import { AuditLog, AuditLogSchema } from '../admin/schemas/audit-log.schema';
 
 @Module({
   imports: [
@@ -46,6 +49,7 @@ import { User, UserSchema } from './schemas/user.schema';
     }),
     MongooseModule.forFeature([
       { name: User.name, schema: UserSchema },
+      { name: AuditLog.name, schema: AuditLogSchema },
       { name: FarmerProfile.name, schema: FarmerProfileSchema },
       { name: BuyerProfile.name, schema: BuyerProfileSchema },
       { name: TransporterProfile.name, schema: TransporterProfileSchema },
@@ -55,9 +59,10 @@ import { User, UserSchema } from './schemas/user.schema';
       },
     ]),
   ],
-  controllers: [AuthController, FarmerProfileController],
+  controllers: [AuthController, AccountController, FarmerProfileController],
   providers: [
     AuthService,
+    AccountService,
     JwtStrategy,
     FirebaseSessionAuthGuard,
     FarmerProfileService,

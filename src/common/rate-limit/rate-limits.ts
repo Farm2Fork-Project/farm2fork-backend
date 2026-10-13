@@ -23,3 +23,7 @@ export const AuthRateLimit = () =>
 /** Farmer AI requests: each one runs a model or pricing computation. */
 export const AiRateLimit = () =>
   Throttle({ default: { limit: 20, ttl: MINUTE_MS } });
+
+/** Avatar upload/removal: image processing, so a tight per-IP budget. */
+export const AvatarRateLimit = () =>
+  Throttle({ default: { limit: 10, ttl: MINUTE_MS } });

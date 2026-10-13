@@ -1,3 +1,4 @@
+import { avatarUrl } from '../../infrastructure/storage/avatar';
 import {
   ConflictException,
   ForbiddenException,
@@ -495,6 +496,8 @@ export class AuthService {
       email: user.email,
       role: user.role,
       phone: user.phone,
+      fullName: user.fullName,
+      avatarUrl: avatarUrl(user.avatarPath),
       isVerified: user.isVerified,
       isActive: user.isActive,
     };

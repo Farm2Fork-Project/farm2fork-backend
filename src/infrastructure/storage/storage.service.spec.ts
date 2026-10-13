@@ -1,4 +1,5 @@
 import { ConfigService } from '@nestjs/config';
+import { v2 as cloudinary } from 'cloudinary';
 import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -75,5 +76,74 @@ describe('StorageService (local fallback)', () => {
     await expect(
       storage.readLocal('public', '../../etc/passwd'),
     ).resolves.toBeNull();
+  });
+});
+
+describe('StorageService avatars', () => {
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46]);
+  const userId = '64b7f0c2a1b2c3d4e5f60718';
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  const withCloudinary = () =>
+    new StorageService({
+      get: (key: string) =>
+        key === 'CLOUDINARY_URL' ? 'cloudinary://key:secret@demo' : undefined,
+    } as ConfigService);
+
+  it('uploads to a per-user public_id and returns only the delivery path', async () => {
+    const upload = jest
+      .spyOn(cloudinary.uploader, 'upload_stream')
+      .mockImplementation(
+        (
+          _options: unknown,
+          callback: (error: unknown, result: unknown) => void,
+        ) => {
+          callback(undefined, {
+            public_id: `farm2fork/avatars/${userId}`,
+            version: 1700000000,
+            format: 'jpg',
+            secure_url: 'https://res.cloudinary.com/demo/ignored',
+          });
+          return { end: jest.fn() };
+        },
+      );
+
+    const path = await withCloudinary().uploadAvatar(JPEG, userId);
+
+    expect(path).toBe(`v1700000000/farm2fork/avatars/${userId}`);
+    expect(upload.mock.calls[0][0]).toMatchObject({
+      public_id: `farm2fork/avatars/${userId}`,
+      overwrite: true,
+      invalidate: true,
+      resource_type: 'image',
+      allowed_formats: ['jpg', 'png', 'webp'],
+      transformation: [{ width: 1024, height: 1024, crop: 'limit' }],
+    });
+  });
+
+  it('rejects non-image content before anything leaves the server', async () => {
+    const upload = jest.spyOn(cloudinary.uploader, 'upload_stream');
+    await expect(
+      withCloudinary().uploadAvatar(Buffer.from('<svg onload=x>'), userId),
+    ).rejects.toThrow('Only JPEG, PNG or WebP images are accepted');
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it('deletes by public_id, invalidating the CDN copy, and ignores foreign paths', async () => {
+    const destroy = jest
+      .spyOn(cloudinary.uploader, 'destroy')
+      .mockResolvedValue({ result: 'ok' });
+    const storage = withCloudinary();
+    await storage.deleteAvatar(`v9/farm2fork/avatars/${userId}`);
+    expect(destroy).toHaveBeenCalledWith(`farm2fork/avatars/${userId}`, {
+      resource_type: 'image',
+      type: 'upload',
+      invalidate: true,
+    });
+    await storage.deleteAvatar('v9/someone/elses/asset');
+    expect(destroy).toHaveBeenCalledTimes(1);
   });
 });
