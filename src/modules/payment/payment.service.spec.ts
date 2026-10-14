@@ -438,6 +438,7 @@ describe('PaymentService', () => {
     expect(safepayClient.verifyWebhookSignature).toHaveBeenCalledWith(
       { token: 'track_789' },
       'a-valid-signature',
+      expect.objectContaining({ body: expect.any(Object) }),
     );
     expect(paymentModel.findOne).toHaveBeenCalledWith({
       gatewayRef: 'track_789',

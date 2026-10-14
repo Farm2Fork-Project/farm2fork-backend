@@ -12,7 +12,10 @@ import { AppModule } from './app.module';
 import { createSwaggerDocument } from './swagger-document';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    // Safepay signs the webhook request; keep the exact bytes to verify it.
+    rawBody: true,
+  });
   const configService = app.get(ConfigService);
 
   // Get configuration values
