@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   HttpException,
   PayloadTooLargeException,
   ServiceUnavailableException,
@@ -10,6 +11,12 @@ import { Test } from '@nestjs/testing';
 import { Types } from 'mongoose';
 import { ProductUnit } from '../marketplace/schemas/product.schema';
 import { AiService } from './ai.service';
+import {
+  GRADABLE_CROPS,
+  GradableCrop,
+  QualityCheckRequestDto,
+} from './dto/ai.dto';
+import { validate } from 'class-validator';
 import { AiPrediction, PredictionType } from './schemas/ai-prediction.schema';
 
 const FARMER = '6a2fe77bb77795516febc111';
@@ -63,45 +70,101 @@ describe('AiService', () => {
     fetchMock.mockRestore();
   });
 
-  it('grades a photo, forwards the internal token and stores the prediction', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse(200, {
-        qualityGrade: 'B',
-        confidenceScore: 0.81,
-        probabilities: { A: 0.1, B: 0.81, C: 0.06, D: 0.03 },
-        crop: 'mango',
-        cropSupported: true,
-        lowConfidence: false,
-        modelStatus: 'trained',
-        modelVersion: 'grade-cond-efficientnet_b0-1a2b3c4d',
-      }),
-    );
+  it.each(['other', 'cotton', 'sugarcane', 'tomato', '', undefined])(
+    'rejects unsupported crop %s before fetching or storing a prediction',
+    async (crop) => {
+      const error = await service
+        .checkQuality(FARMER, crop as GradableCrop, image())
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as BadRequestException).getStatus()).toBe(400);
+      expect((error as Error).message).toContain(
+        'wheat, rice, mango and maize',
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(predictionModel.create).not.toHaveBeenCalled();
+    },
+  );
 
-    const result = await service.checkQuality(FARMER, 'mango', image());
-
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('http://ai.internal:8000/predict/quality');
-    expect(new Headers(init.headers).get('X-Internal-Token')).toBe(
-      'internal-secret',
-    );
-    const form = init.body as FormData;
-    expect(form.get('crop')).toBe('mango');
-    expect(form.get('image')).toBeInstanceOf(Blob);
-    expect(result).toMatchObject({
-      modelGrade: 'B',
-      suggestedListingGrade: 'B',
-      modelStatus: 'trained',
-    });
-    expect(predictionModel.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        predictionType: PredictionType.Quality,
-        qualityGrade: 'B',
-        modelGrade: 'B',
-        confidenceScore: 0.81,
-        modelVersion: 'grade-cond-efficientnet_b0-1a2b3c4d',
-      }),
-    );
+  it('validates only the four supported crop selections at the API boundary', async () => {
+    expect(GRADABLE_CROPS).toEqual(['wheat', 'rice', 'mango', 'maize']);
+    for (const crop of [...GRADABLE_CROPS, 'other', 'cotton', 'sugarcane']) {
+      const dto = Object.assign(new QualityCheckRequestDto(), { crop });
+      const errors = await validate(dto);
+      expect(errors.length).toBe(
+        GRADABLE_CROPS.includes(crop as GradableCrop) ? 0 : 1,
+      );
+    }
   });
+
+  it.each([
+    { crop: 'mango', cropSupported: false },
+    { crop: 'cotton', cropSupported: true },
+    { crop: 'rice', cropSupported: true },
+  ])(
+    'does not suggest or persist a listing grade for unsupported or mismatched output %j',
+    async (output) => {
+      fetchMock.mockResolvedValue(
+        jsonResponse(200, {
+          qualityGrade: 'A',
+          confidenceScore: 0.9,
+          probabilities: { A: 0.9, B: 0.05, C: 0.03, D: 0.02 },
+          ...output,
+          lowConfidence: false,
+          modelStatus: 'trained',
+          modelVersion: 'test-model',
+        }),
+      );
+      const result = await service.checkQuality(FARMER, 'mango', image());
+      expect(result.suggestedListingGrade).toBeNull();
+      expect(
+        predictionModel.create.mock.calls[0][0].qualityGrade,
+      ).toBeUndefined();
+    },
+  );
+
+  it.each(GRADABLE_CROPS)(
+    'grades a %s photo, forwards the internal token and stores the prediction',
+    async (crop) => {
+      fetchMock.mockResolvedValue(
+        jsonResponse(200, {
+          qualityGrade: 'B',
+          confidenceScore: 0.81,
+          probabilities: { A: 0.1, B: 0.81, C: 0.06, D: 0.03 },
+          crop,
+          cropSupported: true,
+          lowConfidence: false,
+          modelStatus: 'trained',
+          modelVersion: 'grade-cond-efficientnet_b0-1a2b3c4d',
+        }),
+      );
+
+      const result = await service.checkQuality(FARMER, crop, image());
+
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe('http://ai.internal:8000/predict/quality');
+      expect(new Headers(init.headers).get('X-Internal-Token')).toBe(
+        'internal-secret',
+      );
+      const form = init.body as FormData;
+      expect(form.get('crop')).toBe(crop);
+      expect(form.get('image')).toBeInstanceOf(Blob);
+      expect(result).toMatchObject({
+        modelGrade: 'B',
+        suggestedListingGrade: 'B',
+        modelStatus: 'trained',
+      });
+      expect(predictionModel.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          predictionType: PredictionType.Quality,
+          qualityGrade: 'B',
+          modelGrade: 'B',
+          confidenceScore: 0.81,
+          modelVersion: 'grade-cond-efficientnet_b0-1a2b3c4d',
+        }),
+      );
+    },
+  );
 
   it('never suggests a listing grade for a D and keeps the enum-safe field empty', async () => {
     fetchMock.mockResolvedValue(
