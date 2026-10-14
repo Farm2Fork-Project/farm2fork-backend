@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -218,6 +219,25 @@ export class MarketplaceService {
     dto: UpdateProductDto,
   ): Promise<ProductResponseDto> {
     const product = await this.getOwned(id, farmerId);
+    if (dto.quantity !== undefined) {
+      const { expectedQuantity, ...changes } = dto;
+      const updated = await this.productModel
+        .findOneAndUpdate(
+          {
+            _id: product._id,
+            farmerId: product.farmerId,
+            quantity: expectedQuantity ?? product.quantity,
+          },
+          { $set: changes },
+          { new: true, runValidators: true },
+        )
+        .exec();
+      if (!updated)
+        throw new ConflictException(
+          'Stock changed while you were editing. Refresh this listing before changing its quantity.',
+        );
+      return (await this.toResponses([updated]))[0];
+    }
     if (dto.name !== undefined) product.name = dto.name;
     if (dto.category !== undefined) product.category = dto.category;
     if (dto.description !== undefined) product.description = dto.description;

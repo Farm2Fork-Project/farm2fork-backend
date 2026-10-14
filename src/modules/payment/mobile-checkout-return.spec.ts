@@ -52,6 +52,11 @@ describe('Mobile checkout return contract', () => {
         {
           provide: getModelToken(Order.name),
           useValue: {
+            updateOne: jest
+              .fn()
+              .mockReturnValue({
+                exec: jest.fn().mockResolvedValue({ matchedCount: 1 }),
+              }),
             findById: () => ({
               exec: () =>
                 Promise.resolve({

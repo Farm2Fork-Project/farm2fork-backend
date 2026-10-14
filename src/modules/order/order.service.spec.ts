@@ -1,3 +1,4 @@
+import { Payment } from '../payment/schemas/payment.schema';
 import {
   BadRequestException,
   ForbiddenException,
@@ -59,6 +60,7 @@ describe('OrderService', () => {
     find: jest.Mock;
     findById: jest.Mock;
     countDocuments: jest.Mock;
+    findOneAndUpdate: jest.Mock;
   };
   let productModel: { find: jest.Mock };
   let configService: {
@@ -94,6 +96,7 @@ describe('OrderService', () => {
       find: jest.fn(),
       findById: jest.fn(),
       countDocuments: jest.fn(),
+      findOneAndUpdate: jest.fn(),
     };
     productModel = { find: jest.fn() };
     configService = {
@@ -112,6 +115,17 @@ describe('OrderService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         OrderService,
+        {
+          provide: getModelToken(Payment.name),
+          useValue: {
+            exists: jest
+              .fn()
+              .mockReturnValue({ exec: jest.fn().mockResolvedValue(null) }),
+            distinct: jest
+              .fn()
+              .mockReturnValue({ exec: jest.fn().mockResolvedValue([]) }),
+          },
+        },
         { provide: getModelToken(Order.name), useValue: orderModel },
         { provide: getModelToken(Product.name), useValue: productModel },
         { provide: SystemConfigService, useValue: configService },
@@ -363,6 +377,7 @@ describe('OrderService', () => {
   describe('findOne / cancel', () => {
     function orderDoc(overrides: Record<string, unknown> = {}) {
       return {
+        _id: new Types.ObjectId('6a2fe77bb77795516febc500'),
         id: '6a2fe77bb77795516febc500',
         buyerId: new Types.ObjectId(BUYER),
         farmerId: new Types.ObjectId(FARMER_A),
@@ -406,12 +421,65 @@ describe('OrderService', () => {
       orderModel.findById.mockReturnValue({
         exec: jest.fn().mockResolvedValue(doc),
       });
+      orderModel.findOneAndUpdate.mockReturnValue({
+        exec: jest
+          .fn()
+          .mockResolvedValue({ ...doc, status: OrderStatus.Cancelled }),
+      });
       const result = await service.cancel('6a2fe77bb77795516febc500', {
         id: BUYER,
         role: UserRole.Buyer,
       } as RequestUser);
-      expect(doc.save).toHaveBeenCalled();
+      expect(orderModel.findOneAndUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: OrderStatus.Pending,
+          paymentStartedAt: { $exists: false },
+        }),
+        { $set: { status: OrderStatus.Cancelled } },
+        { new: true },
+      );
       expect(result.status).toBe(OrderStatus.Cancelled);
+    });
+
+    it.each([OrderStatus.Paid, OrderStatus.Processing, OrderStatus.Shipped])(
+      'rejects cancellation of %s without a refund workflow',
+      async (status) => {
+        orderModel.findById.mockReturnValue({
+          exec: jest.fn().mockResolvedValue(orderDoc({ status })),
+        });
+        await expect(
+          service.cancel('6a2fe77bb77795516febc500', {
+            id: BUYER,
+            role: UserRole.Buyer,
+          } as RequestUser),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(orderModel.findOneAndUpdate).not.toHaveBeenCalled();
+      },
+    );
+    it('rejects a gateway attempt and a cancellation/payment race', async () => {
+      orderModel.findById.mockReturnValue({
+        exec: jest
+          .fn()
+          .mockResolvedValue(orderDoc({ paymentStartedAt: new Date() })),
+      });
+      await expect(
+        service.cancel('6a2fe77bb77795516febc500', {
+          id: BUYER,
+          role: UserRole.Buyer,
+        } as RequestUser),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      orderModel.findById.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(orderDoc()),
+      });
+      orderModel.findOneAndUpdate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(null),
+      });
+      await expect(
+        service.cancel('6a2fe77bb77795516febc500', {
+          id: BUYER,
+          role: UserRole.Buyer,
+        } as RequestUser),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('refuses to cancel a delivered order', async () => {

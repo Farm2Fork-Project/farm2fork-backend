@@ -103,7 +103,7 @@ export class OrderController {
   @ApiOperation({
     summary: 'Cancel an order',
     description:
-      'Buyer only, and only before the order is delivered (status flow §17.3).',
+      'Buyer only: unpaid drafts without any payment session. Paid orders require a separate refund workflow.',
   })
   @ApiParam({ name: 'id', description: 'Order id' })
   @ApiOkResponse({ type: OrderResponseDto })

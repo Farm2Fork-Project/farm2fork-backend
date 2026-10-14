@@ -148,6 +148,10 @@ export class Order {
   })
   status!: OrderStatus;
 
+  /** Set atomically before a gateway session starts; blocks draft cancellation. */
+  @Prop({ type: Date })
+  paymentStartedAt?: Date;
+
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Payment' })
   paymentId?: Types.ObjectId;
 

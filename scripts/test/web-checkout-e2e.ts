@@ -377,6 +377,35 @@ async function main() {
     ) {
       throw new Error('Unexpected persisted checkout result');
     }
+    // A listing editor opened before settlement must not restore sold stock.
+    const settledProduct = await products
+      .findOne({ farmerId: farmers[0]._id })
+      .orFail()
+      .exec();
+    const marketplace = moduleRef.get(MarketplaceService);
+    const edited = await marketplace.update(settledProduct.id, farmers[0].id, {
+      description: 'Updated after settlement',
+    });
+    if (edited.quantity !== 0 || edited.status !== ProductStatus.SoldOut)
+      throw new Error('Unrelated edit restored settled stock or visibility');
+    let stockConflict = false;
+    try {
+      await marketplace.update(settledProduct.id, farmers[0].id, {
+        quantity: 5,
+        expectedQuantity: 2,
+      });
+    } catch (error) {
+      stockConflict =
+        (error as { getStatus?: () => number }).getStatus?.() === 409;
+    }
+    if (
+      !stockConflict ||
+      (await products.findById(settledProduct.id).orFail()).quantity !== 0
+    )
+      throw new Error('Stale stock replacement was not rejected');
+    console.log(
+      'PASS: listing edits preserve settled inventory; stale stock replacement conflicts',
+    );
     if (delivery) {
       const shipments = await moduleRef
         .get<Model<Shipment>>(getModelToken(Shipment.name))
@@ -626,6 +655,106 @@ async function main() {
     }
     console.log(
       `PASS: ${mobile ? 'mobile' : 'web'} checkout/return/retry -> real HTTP/JWT/CSRF -> MongoDB -> ${delivery ? 'two delivered orders, shipments and ten ledger outbox records' : 'exactly two paid orders and ledger outbox records'}`,
+    );
+    // Draft cancellation is exercised after the checkout/notification invariants
+    // above, on additional disposable fixtures. No hosted gateway is contacted.
+    const cancelProduct = await products.create({
+      farmerId: farmers[0]._id,
+      name: 'Cancellation fixture',
+      category: 'fruits',
+      price: 10,
+      quantity: 3,
+      unit: 'kg',
+      status: ProductStatus.Active,
+    });
+    const createDraft = async () => {
+      const address = orders[0].shippingAddress;
+      const response = await requestAs(token(buyer), '/orders', 'POST', {
+        items: [{ productId: cancelProduct.id, quantity: 1 }],
+        shippingAddress: {
+          street: address.street,
+          city: address.city,
+          province: address.province,
+          lat: address.lat,
+          lng: address.lng,
+        },
+      });
+      if (!response.ok)
+        throw new Error(`Draft creation failed: ${response.status}`);
+      return (await response.json()) as { id: string; canCancel: boolean };
+    };
+    const draft = await createDraft();
+    if (!draft.canCancel) throw new Error('Unpaid draft is not cancellable');
+    if (
+      (
+        await requestAs(
+          token(otherBuyer),
+          `/orders/${draft.id}/cancel`,
+          'PATCH',
+        )
+      ).status !== 403
+    )
+      throw new Error('Foreign draft cancellation allowed');
+    if (
+      !(await requestAs(token(buyer), `/orders/${draft.id}/cancel`, 'PATCH')).ok
+    )
+      throw new Error('Draft cancellation failed');
+    if (
+      !(await requestAs(token(buyer), `/orders/${draft.id}/cancel`, 'PATCH')).ok
+    )
+      throw new Error('Draft cancellation was not idempotent');
+    if (
+      (
+        await requestAs(token(buyer), '/payments', 'POST', {
+          orderId: draft.id,
+          gateway: 'safepay',
+        })
+      ).status !== 400
+    )
+      throw new Error('Cancelled order accepted payment');
+    const started = await createDraft();
+    if (
+      !(
+        await requestAs(token(buyer), '/payments', 'POST', {
+          orderId: started.id,
+          gateway: 'safepay',
+        })
+      ).ok
+    )
+      throw new Error('Fixture payment initiation failed');
+    // Simulate an older order: the associated payment alone must block cancel.
+    await moduleRef
+      .get<Model<Order>>(getModelToken(Order.name))
+      .updateOne({ _id: started.id }, { $unset: { paymentStartedAt: 1 } });
+    const detail = await requestAs(token(buyer), `/orders/${started.id}`);
+    if (((await detail.json()) as { canCancel: boolean }).canCancel)
+      throw new Error('Legacy payment order advertised cancellation');
+    if (
+      (await requestAs(token(buyer), `/orders/${started.id}/cancel`, 'PATCH'))
+        .status !== 400
+    )
+      throw new Error('Payment-started order cancellation allowed');
+    if (
+      (await requestAs(token(buyer), `/orders/${orders[0].id}/cancel`, 'PATCH'))
+        .status !== 400
+    )
+      throw new Error(
+        'Paid/delivered order cancellation allowed without refund',
+      );
+    const racing = await createDraft();
+    const raced = await Promise.all([
+      requestAs(token(buyer), `/orders/${racing.id}/cancel`, 'PATCH'),
+      requestAs(token(buyer), '/payments', 'POST', {
+        orderId: racing.id,
+        gateway: 'safepay',
+      }),
+    ]);
+    if (raced.filter((response) => response.ok).length !== 1)
+      throw new Error(
+        `Payment/cancel race did not have exactly one winner: ${raced.map((response) => response.status).join(',')}`,
+      );
+    console.log(
+      'PASS: draft cancellation, ownership, legacy-payment guard, paid-order guard and atomic payment/cancel race',
     );
   } finally {
     fabricRuntime?.close();

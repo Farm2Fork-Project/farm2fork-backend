@@ -71,6 +71,7 @@ describe('MarketplaceService', () => {
     find: jest.Mock;
     findById: jest.Mock;
     countDocuments: jest.Mock;
+    findOneAndUpdate: jest.Mock;
   };
   let blockchainModel: { create: jest.Mock; find: jest.Mock };
   let farmerProfileModel: { findOne: jest.Mock; find: jest.Mock };
@@ -100,6 +101,7 @@ describe('MarketplaceService', () => {
       find: jest.fn(),
       findById: jest.fn(),
       countDocuments: jest.fn(),
+      findOneAndUpdate: jest.fn(),
     };
     blockchainModel = {
       create: jest.fn((docs: Record<string, unknown>[]) =>
@@ -353,6 +355,33 @@ describe('MarketplaceService', () => {
           price: 999,
         }),
       ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('rejects an explicit stock edit when the observed quantity has changed', async () => {
+      model.findById.mockReturnValue({
+        exec: jest
+          .fn()
+          .mockResolvedValue(
+            fakeProduct({
+              _id: new Types.ObjectId('6a2fe77bb77795516febc287'),
+              quantity: 8,
+            }),
+          ),
+      });
+      model.findOneAndUpdate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(null),
+      });
+      await expect(
+        service.update('6a2fe77bb77795516febc287', FARMER, {
+          quantity: 12,
+          expectedQuantity: 10,
+        }),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(model.findOneAndUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ quantity: 10 }),
+        { $set: { quantity: 12 } },
+        { new: true, runValidators: true },
+      );
     });
 
     it('applies only provided fields and saves', async () => {

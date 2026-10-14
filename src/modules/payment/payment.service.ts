@@ -91,6 +91,19 @@ export class PaymentService {
       throw new BadRequestException('Only pending orders can be paid');
     }
 
+    // Close draft cancellation before contacting the gateway. The conditional
+    // write shares the order document with cancellation, making the race atomic.
+    const claimed = await this.orderModel
+      .updateOne(
+        { _id: order._id, status: OrderStatus.Pending },
+        { $set: { paymentStartedAt: new Date() } },
+      )
+      .exec();
+    if (claimed.matchedCount !== 1)
+      throw new BadRequestException(
+        'This order is no longer available for payment. Refresh its status.',
+      );
+
     const existing = await this.paymentModel
       .findOne({ orderId: order._id })
       .exec();

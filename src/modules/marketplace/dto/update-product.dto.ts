@@ -1,5 +1,5 @@
 import { ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { IsEnum, IsOptional } from 'class-validator';
+import { IsEnum, IsOptional, IsNumber, Min } from 'class-validator';
 import { ProductStatus } from '../schemas/product.schema';
 import { CreateProductDto } from './create-product.dto';
 
@@ -12,4 +12,12 @@ export class UpdateProductDto extends PartialType(CreateProductDto) {
   @IsOptional()
   @IsEnum(ProductStatus)
   status?: ProductStatus;
+
+  @ApiPropertyOptional({
+    description: 'Stock observed when editing; prevents overwriting sales.',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  expectedQuantity?: number;
 }

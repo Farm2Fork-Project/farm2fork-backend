@@ -64,7 +64,7 @@ const makePayment = (overrides: Record<string, unknown> = {}) => ({
 
 describe('PaymentService', () => {
   let service: PaymentService;
-  let orderModel: { findById: jest.Mock };
+  let orderModel: { findById: jest.Mock; updateOne: jest.Mock };
   let paymentModel: {
     findOne: jest.Mock;
     findById: jest.Mock;
@@ -88,7 +88,14 @@ describe('PaymentService', () => {
   };
 
   beforeEach(async () => {
-    orderModel = { findById: jest.fn() };
+    orderModel = {
+      findById: jest.fn(),
+      updateOne: jest
+        .fn()
+        .mockReturnValue({
+          exec: jest.fn().mockResolvedValue({ matchedCount: 1 }),
+        }),
+    };
     paymentModel = {
       findOne: jest.fn(),
       findById: jest.fn(),
