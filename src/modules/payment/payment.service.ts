@@ -365,6 +365,7 @@ export class PaymentService {
     gateway: PaymentGateway,
     body: Record<string, unknown>,
     signatureHeader: string | undefined,
+    rawBody?: Buffer,
   ): Promise<{ received: boolean; gateway: PaymentGateway; status: string }> {
     if (gateway !== PaymentGateway.Safepay) {
       throw new NotImplementedException(
@@ -377,7 +378,12 @@ export class PaymentService {
     if (typeof type !== 'string' || typeof data !== 'object' || data === null) {
       throw new BadRequestException('Malformed Safepay webhook payload');
     }
-    if (!this.safepayClient.verifyWebhookSignature(data, signatureHeader)) {
+    if (
+      !this.safepayClient.verifyWebhookSignature(data, signatureHeader, {
+        body,
+        rawBody,
+      })
+    ) {
       throw new ForbiddenException('Invalid Safepay webhook signature');
     }
 
