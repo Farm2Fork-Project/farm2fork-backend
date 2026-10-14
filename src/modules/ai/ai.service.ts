@@ -13,6 +13,7 @@ import { Model, Types } from 'mongoose';
 import { QualityGrade } from '../marketplace/schemas/product.schema';
 import {
   AiStatusResponseDto,
+  GRADABLE_CROPS,
   GradableCrop,
   ModelStatus,
   PriceSuggestionRequestDto,
@@ -93,6 +94,12 @@ export class AiService {
     crop: GradableCrop,
     image: UploadedImage | undefined,
   ): Promise<QualityCheckResponseDto> {
+    // Keep direct callers safe even when HTTP DTO validation is bypassed.
+    if (!GRADABLE_CROPS.includes(crop)) {
+      throw new BadRequestException(
+        'Quality suggestions are available only for wheat, rice, mango and maize. Choose a listing grade manually for other crops.',
+      );
+    }
     if (!image) throw new BadRequestException('Attach a photo of the produce.');
     if (!QUALITY_IMAGE_TYPES.includes(image.mimetype)) {
       throw new UnsupportedMediaTypeException(
@@ -116,6 +123,9 @@ export class AiService {
     });
 
     const suggestedListingGrade =
+      result.cropSupported !== true ||
+      result.crop !== crop ||
+      !GRADABLE_CROPS.includes(result.crop) ||
       result.qualityGrade === 'D'
         ? null
         : (result.qualityGrade as QualityGrade);
