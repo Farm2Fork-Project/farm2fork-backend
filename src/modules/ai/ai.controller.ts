@@ -74,7 +74,7 @@ export class AiController {
   @ApiOperation({
     summary: 'Grade a produce photo (US-09)',
     description:
-      'Farmer only. Runs the crop-conditioned grading model and stores the prediction.',
+      'Farmer only. Provides an optional model suggestion for the selected supported crop (wheat, rice, mango or maize) and stores the prediction.',
   })
   @ApiCreatedResponse({ type: QualityCheckResponseDto })
   @ApiErrorResponses(400, 401, 403, 413, 429, 503)

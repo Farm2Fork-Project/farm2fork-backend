@@ -14,22 +14,18 @@ import {
   QualityGrade,
 } from '../../marketplace/schemas/product.schema';
 
-/** Crops the grading model knows (farm2fork-ai constants.CROP_CLASSES). */
-export const GRADABLE_CROPS = [
-  'wheat',
-  'rice',
-  'mango',
-  'maize',
-  'cotton',
-  'sugarcane',
-] as const;
+/** Crops supported by the current quality suggestion model. */
+export const GRADABLE_CROPS = ['wheat', 'rice', 'mango', 'maize'] as const;
 export type GradableCrop = (typeof GRADABLE_CROPS)[number];
 
 export type ModelStatus = 'trained' | 'untrained';
 
 export class QualityCheckRequestDto {
   @ApiProperty({ enum: GRADABLE_CROPS, example: 'mango' })
-  @IsIn(GRADABLE_CROPS)
+  @IsIn(GRADABLE_CROPS, {
+    message:
+      'Quality suggestions are available only for wheat, rice, mango and maize. Choose a listing grade manually for other crops.',
+  })
   crop!: GradableCrop;
 }
 
@@ -44,7 +40,7 @@ export class QualityCheckResponseDto {
     enum: QualityGrade,
     nullable: true,
     description:
-      'Grade to pre-fill on a listing; null when the model says D (below listable grades).',
+      'Optional grade suggestion for the selected supported crop; null for unsupported output or D (below listable grades).',
   })
   suggestedListingGrade!: QualityGrade | null;
 
