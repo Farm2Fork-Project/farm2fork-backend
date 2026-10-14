@@ -6,7 +6,10 @@ import {
   Param,
   Post,
   Query,
+  type RawBodyRequest,
+  Req,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -112,8 +115,14 @@ export class PaymentController {
     @Param('gateway') gateway: PaymentGateway,
     @Body() body: Record<string, unknown>,
     @Headers('x-sfpy-signature') signature: string | undefined,
+    @Req() request: RawBodyRequest<Request>,
   ): Promise<{ received: boolean; gateway: PaymentGateway; status: string }> {
-    return this.paymentService.handleWebhook(gateway, body, signature);
+    return this.paymentService.handleWebhook(
+      gateway,
+      body,
+      signature,
+      request.rawBody,
+    );
   }
 
   @Post(':id/simulate')

@@ -123,13 +123,17 @@ export class SafepayClient {
   }
 
   /**
-   * Mirrors @sfpy/node-sdk's Verify.webhook(): HMAC-SHA512 over
-   * JSON.stringify(body.data), header `x-sfpy-signature`. Compares with
-   * timingSafeEqual rather than the SDK's plain `===`.
+   * HMAC-SHA512 (hex) with the endpoint's shared secret, header
+   * `x-sfpy-signature`. Safepay's docs are ambiguous about what is hashed
+   * (the raw request body in the library example, `JSON.stringify` of the
+   * payload in the own-solution guide) and the older SDK hashed only
+   * `data`, so every variant is accepted; each requires the secret. Which one
+   * matched is logged so the scheme can be pinned down from a real delivery.
    */
   verifyWebhookSignature(
     data: unknown,
     signatureHeader: string | undefined,
+    context: { body?: unknown; rawBody?: Buffer } = {},
   ): boolean {
     if (!signatureHeader) return false;
     const webhookSecret = this.requireConfig(
@@ -137,21 +141,38 @@ export class SafepayClient {
       'SAFEPAY_WEBHOOK_SECRET',
     );
 
-    const serializedData = Buffer.from(JSON.stringify(data ?? null));
-    const expectedHex = createHmac('sha512', webhookSecret)
-      .update(serializedData)
-      .digest('hex');
-
-    let expected: Buffer;
     let received: Buffer;
     try {
-      expected = Buffer.from(expectedHex, 'hex');
-      received = Buffer.from(signatureHeader, 'hex');
+      received = Buffer.from(signatureHeader.trim(), 'hex');
     } catch {
       return false;
     }
-    if (expected.length !== received.length) return false;
-    return timingSafeEqual(expected, received);
+
+    const candidates: Array<[string, Buffer]> = [];
+    if (context.rawBody?.length) candidates.push(['raw-body', context.rawBody]);
+    if (context.body !== undefined) {
+      candidates.push(['body', Buffer.from(JSON.stringify(context.body))]);
+    }
+    candidates.push(['data', Buffer.from(JSON.stringify(data ?? null))]);
+
+    for (const [scheme, payload] of candidates) {
+      const expected = createHmac('sha512', webhookSecret)
+        .update(payload)
+        .digest();
+      if (
+        expected.length === received.length &&
+        timingSafeEqual(expected, received)
+      ) {
+        this.logger.log(`Safepay webhook signature verified (${scheme})`);
+        return true;
+      }
+    }
+    this.logger.warn(
+      `Safepay webhook signature mismatch (tried ${candidates
+        .map(([scheme]) => scheme)
+        .join(', ')}; signature ${received.length} bytes)`,
+    );
+    return false;
   }
 
   // --- internals -------------------------------------------------------------
