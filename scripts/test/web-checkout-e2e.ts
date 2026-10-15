@@ -1,3 +1,17 @@
+import { DeliveryService } from '../../src/modules/delivery/delivery.service';
+import { DeliveryController } from '../../src/modules/delivery/delivery.controller';
+import {
+  DeliveryEarning,
+  DeliveryEarningSchema,
+  DeliveryPayout,
+  DeliveryPayoutSchema,
+  ManualRefund,
+  ManualRefundSchema,
+} from '../../src/modules/delivery/schemas/delivery-finance.schema';
+import {
+  AuditLog,
+  AuditLogSchema,
+} from '../../src/modules/admin/schemas/audit-log.schema';
 /** Real web components/repository -> Nest HTTP/JWT -> MongoDB transactions.
  * Safepay tracker/passport endpoints use local HTTP fixtures. Notifications are persisted;
  * push delivery needs a real device. Transport and ledger outbox persistence are real.
@@ -160,9 +174,14 @@ async function main() {
             schema: BlockchainTransactionSchema,
           },
           { name: SystemConfig.name, schema: SystemConfigSchema },
+          { name: AuditLog.name, schema: AuditLogSchema },
+          { name: DeliveryEarning.name, schema: DeliveryEarningSchema },
+          { name: DeliveryPayout.name, schema: DeliveryPayoutSchema },
+          { name: ManualRefund.name, schema: ManualRefundSchema },
         ]),
       ],
       controllers: [
+        DeliveryController,
         MarketplaceController,
         OrderController,
         PaymentController,
@@ -171,6 +190,7 @@ async function main() {
         NotificationController,
       ],
       providers: [
+        DeliveryService,
         FarmerProfileService,
         MarketplaceService,
         StorageService,
@@ -321,8 +341,13 @@ async function main() {
         CHECKOUT_TEST_SECOND_FARMER_TOKEN: token(farmers[1]),
         CHECKOUT_TEST_WEBHOOK_SECRET: webhookSecret,
       };
+      const fixtureRoot = mobile
+        ? (process.env.CHECKOUT_MOBILE_ROOT ??
+          resolve(__dirname, '../../../farm2fork-mobile'))
+        : (process.env.CHECKOUT_WEB_ROOT ??
+          resolve(__dirname, '../../../farm2fork-web'));
       const child = spawn(
-        mobile ? (process.env.FLUTTER_BIN ?? 'flutter') : 'pnpm',
+        mobile ? (process.env.FLUTTER_BIN ?? 'flutter') : process.execPath,
         mobile
           ? [
               'test',
@@ -332,12 +357,13 @@ async function main() {
                 ([key, value]) => `--dart-define=${key}=${value}`,
               ),
             ]
-          : ['exec', 'vitest', 'run', 'test/live-checkout-flow.test.tsx'],
+          : [
+              resolve(fixtureRoot, 'node_modules/vitest/vitest.mjs'),
+              'run',
+              'test/live-checkout-flow.test.tsx',
+            ],
         {
-          cwd: resolve(
-            __dirname,
-            mobile ? '../../../farm2fork-mobile' : '../../../farm2fork-web',
-          ),
+          cwd: fixtureRoot,
           stdio: 'inherit',
           env: { ...process.env, ...fixtureEnv },
         },
@@ -383,17 +409,25 @@ async function main() {
       .orFail()
       .exec();
     const marketplace = moduleRef.get(MarketplaceService);
-    const edited = await marketplace.update(settledProduct.id, farmers[0].id, {
-      description: 'Updated after settlement',
-    });
+    const edited = await marketplace.update(
+      settledProduct._id.toHexString(),
+      farmers[0]._id.toHexString(),
+      {
+        description: 'Updated after settlement',
+      },
+    );
     if (edited.quantity !== 0 || edited.status !== ProductStatus.SoldOut)
       throw new Error('Unrelated edit restored settled stock or visibility');
     let stockConflict = false;
     try {
-      await marketplace.update(settledProduct.id, farmers[0].id, {
-        quantity: 5,
-        expectedQuantity: 2,
-      });
+      await marketplace.update(
+        settledProduct._id.toHexString(),
+        farmers[0]._id.toHexString(),
+        {
+          quantity: 5,
+          expectedQuantity: 2,
+        },
+      );
     } catch (error) {
       stockConflict =
         (error as { getStatus?: () => number }).getStatus?.() === 409;
@@ -670,7 +704,7 @@ async function main() {
     const createDraft = async () => {
       const address = orders[0].shippingAddress;
       const response = await requestAs(token(buyer), '/orders', 'POST', {
-        items: [{ productId: cancelProduct.id, quantity: 1 }],
+        items: [{ productId: String(cancelProduct.id), quantity: 1 }],
         shippingAddress: {
           street: address.street,
           city: address.city,

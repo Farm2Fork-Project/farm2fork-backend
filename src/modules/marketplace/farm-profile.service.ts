@@ -61,6 +61,7 @@ export class FarmProfileService {
         .countDocuments({
           farmerId: userId,
           status: ProductStatus.Active,
+          adminHidden: { $ne: true },
           quantity: { $gt: 0 },
         })
         .exec(),

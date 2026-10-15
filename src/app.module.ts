@@ -1,3 +1,4 @@
+import { DeliveryModule } from './modules/delivery/delivery.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
@@ -39,6 +40,7 @@ const shouldLoadInfrastructure = process.env.NODE_ENV !== 'test';
 // Feature modules depend on the Mongoose connection, so they load alongside the
 // infrastructure modules (skipped under NODE_ENV=test, matching DatabaseModule).
 const featureModules = [
+  DeliveryModule,
   AuthModule,
   MarketplaceModule,
   OrderModule,

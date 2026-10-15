@@ -39,6 +39,9 @@ export enum ProductStatus {
   },
 })
 export class Product {
+  /** Admin moderation persists independently of farmer availability edits. */
+  @Prop({ default: false })
+  adminHidden!: boolean;
   @Prop({
     type: MongooseSchema.Types.ObjectId,
     ref: 'User',

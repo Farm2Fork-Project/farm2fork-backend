@@ -194,6 +194,7 @@ export class MarketplaceService {
    */
   async findAll(query: QueryProductDto): Promise<ProductListResponseDto> {
     const filter = this.buildFilter(query);
+    filter.adminHidden = { $ne: true };
     if (!query.status || query.status === ProductStatus.Inactive) {
       filter.status = { $ne: ProductStatus.Inactive };
     }
@@ -220,12 +221,15 @@ export class MarketplaceService {
     query: QueryProductDto,
   ): Promise<ProductListResponseDto> {
     const filter = this.buildFilter(query);
+    filter.adminHidden = { $ne: true };
     filter.farmerId = new Types.ObjectId(farmerId);
     return this.search(query, filter);
   }
 
   async findOne(id: string): Promise<ProductResponseDto> {
-    return (await this.toResponses([await this.getOwnedOrAny(id)]))[0];
+    const product = await this.getOwnedOrAny(id);
+    if (product.adminHidden) throw new NotFoundException('Product not found');
+    return (await this.toResponses([product]))[0];
   }
 
   async update(

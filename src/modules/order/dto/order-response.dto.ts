@@ -14,6 +14,9 @@ export class OrderItemResponseDto {
   })
   productName!: string;
 
+  @ApiPropertyOptional()
+  unit?: string;
+
   @ApiProperty({ example: 10 })
   quantity!: number;
 

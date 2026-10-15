@@ -34,6 +34,10 @@ export class OrderItem {
   @Prop({ required: true })
   productName!: string;
 
+  /** Unit snapshot; absent on legacy orders. */
+  @Prop({ type: String, enum: ['kg', 'ton', 'dozen', 'piece', 'litre'] })
+  unit?: string;
+
   @Prop({ required: true, min: 0 })
   quantity!: number;
 

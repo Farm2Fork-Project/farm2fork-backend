@@ -143,7 +143,7 @@ export class OrderService {
       if (!product) {
         throw new BadRequestException(`Product ${line.productId} not found`);
       }
-      if (product.status !== ProductStatus.Active) {
+      if (product.adminHidden || product.status !== ProductStatus.Active) {
         throw new BadRequestException(
           `Product ${product.name} is not available`,
         );
@@ -156,6 +156,7 @@ export class OrderService {
         productId: product._id,
         farmerId: product.farmerId,
         productName: product.name,
+        unit: product.unit,
         quantity: line.quantity,
         unitPrice: product.price,
         subtotal: product.price * line.quantity,

@@ -474,10 +474,9 @@ export class PaymentService {
       throw new BadRequestException('Only successful payments can be refunded');
     }
 
-    payment.status = PaymentStatus.Refunded;
-    payment.refundedAt = new Date();
-    await payment.save();
-    return this.toResponse(payment);
+    throw new BadRequestException(
+      'Record an evidenced external refund through delivery administration; changing a database status does not return money.',
+    );
   }
 
   // --- internals -------------------------------------------------------------
@@ -499,7 +498,7 @@ export class PaymentService {
 
   private toResponse(payment: PaymentDocument): PaymentResponseDto {
     return {
-      id: payment.id,
+      id: String(payment.id),
       orderId: payment.orderId.toHexString(),
       buyerId: payment.buyerId.toHexString(),
       amount: payment.amount,

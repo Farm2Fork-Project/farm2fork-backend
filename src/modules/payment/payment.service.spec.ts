@@ -90,11 +90,9 @@ describe('PaymentService', () => {
   beforeEach(async () => {
     orderModel = {
       findById: jest.fn(),
-      updateOne: jest
-        .fn()
-        .mockReturnValue({
-          exec: jest.fn().mockResolvedValue({ matchedCount: 1 }),
-        }),
+      updateOne: jest.fn().mockReturnValue({
+        exec: jest.fn().mockResolvedValue({ matchedCount: 1 }),
+      }),
     };
     paymentModel = {
       findOne: jest.fn(),
@@ -531,20 +529,16 @@ describe('PaymentService', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('persists an admin refund without changing inventory', async () => {
+  it('rejects database-only refunds without evidence of an actual money return', async () => {
     const payment = makePayment({
       id: new Types.ObjectId().toHexString(),
       status: PaymentStatus.Success,
     });
-    payment.save.mockResolvedValue(payment);
     paymentModel.findById.mockReturnValue(query(payment));
-
-    const result = await service.refund(payment.id);
-
-    expect(result.status).toBe(PaymentStatus.Refunded);
-    expect(payment.refundedAt).toBeInstanceOf(Date);
-    expect(payment.save).toHaveBeenCalledTimes(1);
-    expect(productModel.updateOne).not.toHaveBeenCalled();
+    await expect(service.refund(payment.id)).rejects.toThrow(
+      /external refund/i,
+    );
+    expect(payment.save).not.toHaveBeenCalled();
   });
 
   it('does not refund a payment that was never successful', async () => {
