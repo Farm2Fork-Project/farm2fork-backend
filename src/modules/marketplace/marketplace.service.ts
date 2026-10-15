@@ -352,7 +352,7 @@ export class MarketplaceService {
           {
             _id: product._id,
             farmerId: product.farmerId,
-            quantity: expectedQuantity ?? product.quantity,
+            quantity: Number(expectedQuantity ?? product.quantity),
           },
           { $set: changes },
           { new: true, runValidators: true },

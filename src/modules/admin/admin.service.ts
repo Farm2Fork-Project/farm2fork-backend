@@ -397,8 +397,8 @@ export class AdminService {
       throw new BadRequestException('Audit entity filter must be a string');
     if (search !== undefined && typeof search !== 'string')
       throw new BadRequestException('Audit search must be a string');
-    if (action) filter.action = action;
-    if (entity) filter.targetEntity = entity;
+    if (action) filter.action = String(action);
+    if (entity) filter.targetEntity = String(entity);
     if (search?.trim()) filter.action = new RegExp(literal(search.trim()), 'i');
     const [items, total] = await Promise.all([
       this.auditModel
