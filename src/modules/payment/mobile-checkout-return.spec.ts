@@ -1,3 +1,4 @@
+import { User } from '../auth/schemas/user.schema';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { Test } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
@@ -33,6 +34,14 @@ describe('Mobile checkout return contract', () => {
       providers: [
         PaymentService,
         {
+          provide: getModelToken(User.name),
+          useValue: {
+            updateOne: () => ({
+              exec: () => Promise.resolve({ matchedCount: 1 }),
+            }),
+          },
+        },
+        {
           provide: NotificationService,
           useValue: { notifyInBackground: jest.fn() },
         },
@@ -52,16 +61,15 @@ describe('Mobile checkout return contract', () => {
         {
           provide: getModelToken(Order.name),
           useValue: {
-            updateOne: jest
-              .fn()
-              .mockReturnValue({
-                exec: jest.fn().mockResolvedValue({ matchedCount: 1 }),
-              }),
+            updateOne: jest.fn().mockReturnValue({
+              exec: jest.fn().mockResolvedValue({ matchedCount: 1 }),
+            }),
             findById: () => ({
               exec: () =>
                 Promise.resolve({
                   _id: orderId,
                   buyerId,
+                  farmerId: new Types.ObjectId(),
                   grandTotal: 210,
                   status: OrderStatus.Pending,
                 }),
@@ -84,7 +92,17 @@ describe('Mobile checkout return contract', () => {
         },
         { provide: getModelToken(Product.name), useValue: {} },
         { provide: getModelToken(BlockchainTransaction.name), useValue: {} },
-        { provide: getConnectionToken(), useValue: {} },
+        {
+          provide: getConnectionToken(),
+          useValue: {
+            startSession: () =>
+              Promise.resolve({
+                withTransaction: (callback: () => Promise<unknown>) =>
+                  callback(),
+                endSession: () => Promise.resolve(),
+              }),
+          },
+        },
         {
           provide: SafepayClient,
           useValue: {

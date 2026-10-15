@@ -1,3 +1,4 @@
+import { Payment, PaymentDocument } from '../payment/schemas/payment.schema';
 import { activeDeliveryFilter } from '../transport/active-delivery';
 import {
   BadRequestException,
@@ -170,6 +171,8 @@ export class AdminService {
     @InjectConnection() private readonly connection: Connection,
     private readonly settings: SystemConfigService,
     private readonly notifications: NotificationService,
+    @InjectModel(Payment.name)
+    private readonly paymentModel: Model<PaymentDocument>,
   ) {}
 
   async overview() {
@@ -306,9 +309,28 @@ export class AdminService {
               },
             })
             .session(session);
-          if (activeDelivery || unresolvedOrder)
+          const pendingOrders = await this.orderModel
+            .find({
+              $or: [{ buyerId: target }, { farmerId: target }],
+              status: OrderStatus.Pending,
+            })
+            .select('_id paymentStartedAt paymentId')
+            .session(session);
+          // The claim is committed before contacting a gateway. Keep accounts
+          // usable even when the gateway result is unknown or persistence failed.
+          const pendingPayment =
+            pendingOrders.some(
+              (order) => order.paymentStartedAt || order.paymentId,
+            ) ||
+            (pendingOrders.length > 0 &&
+              (await this.paymentModel
+                .exists({
+                  orderId: { $in: pendingOrders.map((order) => order._id) },
+                })
+                .session(session)));
+          if (activeDelivery || unresolvedOrder || pendingPayment)
             throw new ConflictException(
-              'Resolve the active delivery or paid orders before deactivating this account',
+              'Resolve the active delivery, paid orders or existing payment sessions before deactivating this account',
             );
         }
         const before = user.isActive;

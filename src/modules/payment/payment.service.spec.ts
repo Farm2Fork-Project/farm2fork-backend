@@ -1,3 +1,4 @@
+import { User } from '../auth/schemas/user.schema';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import {
   ForbiddenException,
@@ -42,6 +43,7 @@ const orderId = '66a2fe77bb77795516febc50';
 const makeOrder = (overrides: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(orderId),
   buyerId: new Types.ObjectId(buyerId),
+  farmerId: new Types.ObjectId(),
   grandTotal: 870,
   status: OrderStatus.Pending,
   ...overrides,
@@ -132,6 +134,14 @@ describe('PaymentService', () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentService,
+        {
+          provide: getModelToken(User.name),
+          useValue: {
+            updateOne: jest.fn().mockReturnValue({
+              exec: jest.fn().mockResolvedValue({ matchedCount: 1 }),
+            }),
+          },
+        },
         { provide: getModelToken(Order.name), useValue: orderModel },
         { provide: getModelToken(Payment.name), useValue: paymentModel },
         { provide: getModelToken(Product.name), useValue: productModel },

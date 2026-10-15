@@ -1,3 +1,4 @@
+import { Payment, PaymentSchema } from '../payment/schemas/payment.schema';
 import { AdminContentService } from './admin-content.service';
 import { AdminContentController } from './admin-content.controller';
 import { Post, PostSchema } from '../community/schemas/post.schema';
@@ -31,6 +32,7 @@ import { SystemConfigService } from './services/system-config.service';
     MongooseModule.forFeature([
       { name: AuditLog.name, schema: AuditLogSchema },
       { name: User.name, schema: UserSchema },
+      { name: Payment.name, schema: PaymentSchema },
       { name: Post.name, schema: PostSchema },
       { name: Comment.name, schema: CommentSchema },
       { name: TransporterProfile.name, schema: TransporterProfileSchema },

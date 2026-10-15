@@ -1,3 +1,7 @@
+import {
+  Payment,
+  PaymentSchema,
+} from '../src/modules/payment/schemas/payment.schema';
 import { AdminContentService } from '../src/modules/admin/admin-content.service';
 import { Post, PostSchema } from '../src/modules/community/schemas/post.schema';
 import {
@@ -68,6 +72,7 @@ describe('Admin operations against a replica set', () => {
       db,
       new SystemConfigService(configs),
       notifications as unknown as NotificationService,
+      db.model(Payment.name, PaymentSchema),
     );
     await Promise.all(Object.values(db.models).map((model) => model.init()));
   });

@@ -1,3 +1,4 @@
+import { User, UserSchema } from '../auth/schemas/user.schema';
 import { Payment, PaymentSchema } from '../payment/schemas/payment.schema';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -21,6 +22,7 @@ import { Order, OrderSchema } from './schemas/order.schema';
   imports: [
     MongooseModule.forFeature([
       { name: Order.name, schema: OrderSchema },
+      { name: User.name, schema: UserSchema },
       { name: Payment.name, schema: PaymentSchema },
       { name: FarmerProfile.name, schema: FarmerProfileSchema },
     ]),

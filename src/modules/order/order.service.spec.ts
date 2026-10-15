@@ -1,3 +1,4 @@
+import { User } from '../auth/schemas/user.schema';
 import { Payment } from '../payment/schemas/payment.schema';
 import {
   BadRequestException,
@@ -115,6 +116,14 @@ describe('OrderService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         OrderService,
+        {
+          provide: getModelToken(User.name),
+          useValue: {
+            exists: jest.fn().mockReturnValue({
+              exec: jest.fn().mockResolvedValue({ _id: FARMER_A }),
+            }),
+          },
+        },
         {
           provide: getModelToken(Payment.name),
           useValue: {

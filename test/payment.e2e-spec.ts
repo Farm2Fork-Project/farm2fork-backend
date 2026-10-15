@@ -1,3 +1,4 @@
+import { User, UserSchema } from '../src/modules/auth/schemas/user.schema';
 import {
   afterAll,
   beforeAll,
@@ -65,6 +66,7 @@ describe('PaymentService transaction integration', () => {
         MongooseModule.forRoot(replSet.getUri()),
         MongooseModule.forFeature([
           { name: Payment.name, schema: PaymentSchema },
+          { name: User.name, schema: UserSchema },
           { name: Order.name, schema: OrderSchema },
           { name: Product.name, schema: ProductSchema },
           {

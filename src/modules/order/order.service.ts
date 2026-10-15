@@ -1,3 +1,4 @@
+import { User, UserDocument } from '../auth/schemas/user.schema';
 import { Payment, PaymentDocument } from '../payment/schemas/payment.schema';
 import {
   BadRequestException,
@@ -58,6 +59,7 @@ export class OrderService {
     private readonly notifications: NotificationService,
     @InjectModel(Payment.name)
     private readonly paymentModel: Model<PaymentDocument>,
+    @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
   ) {}
 
   /** Prices a cart for one farmer without saving anything. */
@@ -172,6 +174,14 @@ export class OrderService {
       );
     }
     const farmerId = items[0].farmerId;
+    if (
+      !(await this.userModel
+        .exists({ _id: farmerId, role: UserRole.Farmer, isActive: true })
+        .exec())
+    )
+      throw new BadRequestException(
+        'This farm is not available for new orders',
+      );
 
     const farm = await this.farmerProfileModel
       .findOne({ userId: farmerId })
