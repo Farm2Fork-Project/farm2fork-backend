@@ -5,3 +5,4 @@ export * from './product-response.dto';
 export * from './product-list-response.dto';
 export * from './product-qr-response.dto';
 export * from './product-images-response.dto';
+export * from './farm-profile-response.dto';

@@ -2,6 +2,9 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AuthModule } from '../auth/auth.module';
 import { BlockchainModule } from '../blockchain/blockchain.module';
+import { Order, OrderSchema } from '../order/schemas/order.schema';
+import { FarmProfileController } from './farm-profile.controller';
+import { FarmProfileService } from './farm-profile.service';
 import { MarketplaceController } from './marketplace.controller';
 import { MarketplaceService } from './marketplace.service';
 import { Product, ProductSchema } from './schemas/product.schema';
@@ -12,12 +15,15 @@ import { Product, ProductSchema } from './schemas/product.schema';
  */
 @Module({
   imports: [
-    MongooseModule.forFeature([{ name: Product.name, schema: ProductSchema }]),
+    MongooseModule.forFeature([
+      { name: Product.name, schema: ProductSchema },
+      { name: Order.name, schema: OrderSchema },
+    ]),
     AuthModule,
     BlockchainModule,
   ],
-  controllers: [MarketplaceController],
-  providers: [MarketplaceService],
+  controllers: [MarketplaceController, FarmProfileController],
+  providers: [MarketplaceService, FarmProfileService],
   exports: [MongooseModule, MarketplaceService],
 })
 export class MarketplaceModule {}
