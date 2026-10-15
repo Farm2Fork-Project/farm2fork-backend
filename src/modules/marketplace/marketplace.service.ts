@@ -197,6 +197,21 @@ export class MarketplaceService {
     if (!query.status || query.status === ProductStatus.Inactive) {
       filter.status = { $ne: ProductStatus.Inactive };
     }
+    if (query.verifiedOrigin) {
+      // Resolved before pagination so page counts stay honest.
+      const confirmed = await this.blockchainModel
+        .find({
+          referenceModel: BlockchainReferenceModel.Product,
+          status: BlockchainTxStatus.Confirmed,
+          'payload.supplyChain.eventType': LISTED_EVENT,
+        })
+        .select('_id')
+        .lean()
+        .exec();
+      filter.initialBlockchainRecordId = {
+        $in: confirmed.map((record) => record._id),
+      };
+    }
     return this.search(query, filter);
   }
 
