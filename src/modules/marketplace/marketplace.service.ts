@@ -32,6 +32,8 @@ import {
   Product,
   ProductDocument,
   ProductStatus,
+  ProductUnit,
+  QualityGrade,
 } from './schemas/product.schema';
 import {
   OriginLedgerStatus,
@@ -237,9 +239,114 @@ export class MarketplaceService {
     farmerId: string,
     dto: UpdateProductDto,
   ): Promise<ProductResponseDto> {
+    const allowedFields = new Set([
+      'name',
+      'category',
+      'description',
+      'price',
+      'quantity',
+      'unit',
+      'images',
+      'qualityGrade',
+      'status',
+      'expectedQuantity',
+    ]);
+    if (Object.keys(dto).some((field) => !allowedFields.has(field)))
+      throw new BadRequestException('Unsupported product update field');
+    const {
+      name,
+      category,
+      description,
+      price,
+      quantity,
+      unit,
+      images,
+      qualityGrade,
+      status,
+      expectedQuantity,
+    } = dto;
+    const changes: Partial<Product> = {};
+    if (name !== undefined) {
+      if (typeof name !== 'string' || !name.trim())
+        throw new BadRequestException('Product name must be a nonempty string');
+      changes.name = name;
+    }
+    if (category !== undefined) {
+      if (typeof category !== 'string' || !category.trim())
+        throw new BadRequestException(
+          'Product category must be a nonempty string',
+        );
+      changes.category = category;
+    }
+    if (description !== undefined) {
+      if (typeof description !== 'string')
+        throw new BadRequestException('Product description must be a string');
+      changes.description = description;
+    }
+    if (price !== undefined) {
+      if (typeof price !== 'number' || !Number.isFinite(price) || price < 0)
+        throw new BadRequestException(
+          'Product price must be a nonnegative number',
+        );
+      changes.price = price;
+    }
+    if (quantity !== undefined) {
+      if (
+        typeof quantity !== 'number' ||
+        !Number.isFinite(quantity) ||
+        quantity < 0
+      )
+        throw new BadRequestException(
+          'Product quantity must be a nonnegative number',
+        );
+      changes.quantity = quantity;
+    }
+    if (
+      expectedQuantity !== undefined &&
+      (typeof expectedQuantity !== 'number' ||
+        !Number.isFinite(expectedQuantity) ||
+        expectedQuantity < 0)
+    )
+      throw new BadRequestException(
+        'Expected stock must be a nonnegative number',
+      );
+    if (unit !== undefined) {
+      if (
+        typeof unit !== 'string' ||
+        !Object.values(ProductUnit).includes(unit)
+      )
+        throw new BadRequestException('Unsupported product unit');
+      changes.unit = unit;
+    }
+    if (qualityGrade !== undefined) {
+      if (
+        typeof qualityGrade !== 'string' ||
+        !Object.values(QualityGrade).includes(qualityGrade)
+      )
+        throw new BadRequestException('Unsupported quality grade');
+      changes.qualityGrade = qualityGrade;
+    }
+    if (status !== undefined) {
+      if (
+        typeof status !== 'string' ||
+        !Object.values(ProductStatus).includes(status)
+      )
+        throw new BadRequestException('Unsupported product status');
+      changes.status = status;
+    }
+    if (images !== undefined) {
+      if (!Array.isArray(images))
+        throw new BadRequestException('Product images must be an array');
+      const cleanImages: string[] = [];
+      for (const image of images) {
+        if (typeof image !== 'string')
+          throw new BadRequestException('Product images must be strings');
+        cleanImages.push(image);
+      }
+      changes.images = cleanImages;
+    }
     const product = await this.getOwned(id, farmerId);
-    if (dto.quantity !== undefined) {
-      const { expectedQuantity, ...changes } = dto;
+    if (quantity !== undefined) {
       const updated = await this.productModel
         .findOneAndUpdate(
           {
@@ -257,15 +364,17 @@ export class MarketplaceService {
         );
       return (await this.toResponses([updated]))[0];
     }
-    if (dto.name !== undefined) product.name = dto.name;
-    if (dto.category !== undefined) product.category = dto.category;
-    if (dto.description !== undefined) product.description = dto.description;
-    if (dto.price !== undefined) product.price = dto.price;
-    if (dto.quantity !== undefined) product.quantity = dto.quantity;
-    if (dto.unit !== undefined) product.unit = dto.unit;
-    if (dto.images !== undefined) product.images = dto.images;
-    if (dto.qualityGrade !== undefined) product.qualityGrade = dto.qualityGrade;
-    if (dto.status !== undefined) product.status = dto.status;
+    // Assign only supplied, validated mutable fields; omitted values stay dirty-free.
+    if (changes.name !== undefined) product.name = changes.name;
+    if (changes.category !== undefined) product.category = changes.category;
+    if (changes.description !== undefined)
+      product.description = changes.description;
+    if (changes.price !== undefined) product.price = changes.price;
+    if (changes.unit !== undefined) product.unit = changes.unit;
+    if (changes.images !== undefined) product.images = changes.images;
+    if (changes.qualityGrade !== undefined)
+      product.qualityGrade = changes.qualityGrade;
+    if (changes.status !== undefined) product.status = changes.status;
     await product.save();
     return (await this.toResponses([product]))[0];
   }

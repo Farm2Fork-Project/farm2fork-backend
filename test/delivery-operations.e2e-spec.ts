@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { Connection, createConnection, Types } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
@@ -192,6 +193,25 @@ describe('Verified delivery, custody and manual settlement', () => {
     ).rejects.toThrow();
     expect(await db.model(DeliveryEarning.name).countDocuments()).toBe(0);
   });
+  it('rejects an operator-shaped payout idempotency key at the service boundary', async () => {
+    await expect(
+      service.payout(
+        {
+          transporterId: driver.id,
+          earningIds: [new Types.ObjectId().toString()],
+          amount: 200,
+          reference: 'BANK-INVALID',
+          paidAt: new Date().toISOString(),
+          reason: 'Bank transfer completed',
+          requestId: { $ne: null } as never,
+        },
+        admin,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(await db.model(DeliveryPayout.name).countDocuments()).toBe(0);
+    expect(await db.model(AuditLog.name).countDocuments()).toBe(0);
+  });
+
   it('concurrent completion and retries create exactly one earning, then competing payouts allocate it once', async () => {
     const { ship, order } = await fixture();
     const { code } = await service.code(ship.id, buyer);

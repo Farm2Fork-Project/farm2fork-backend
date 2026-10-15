@@ -775,6 +775,15 @@ export class DeliveryService {
     };
   }
   async payout(dto: RecordPayoutDto, actor: RequestUser) {
+    const requestId = dto.requestId;
+    if (
+      typeof requestId !== 'string' ||
+      requestId.length === 0 ||
+      requestId.length > 100
+    )
+      throw new BadRequestException(
+        'Payout request identifier must be a string',
+      );
     const paidAt = transferDate(dto.paidAt);
     const amountMinor = minor(dto.amount);
     const earningIds = [...dto.earningIds].sort();
@@ -787,7 +796,7 @@ export class DeliveryService {
       dto.reason,
     ]);
     const existing = await this.payouts
-      .findOne({ requestId: dto.requestId })
+      .findOne({ requestId })
       .select('+fingerprint');
     if (existing) {
       if (existing.fingerprint !== hash)
@@ -818,7 +827,7 @@ export class DeliveryService {
         const [record] = await this.payouts.create(
           [
             {
-              requestId: dto.requestId,
+              requestId,
               fingerprint: hash,
               transporterId: id(dto.transporterId),
               earningIds: earningIds.map(id),
@@ -853,7 +862,7 @@ export class DeliveryService {
     } catch (error) {
       if ((error as { code?: number }).code === 11000) {
         const prior = await this.payouts
-          .findOne({ requestId: dto.requestId })
+          .findOne({ requestId })
           .select('+fingerprint');
         if (prior?.fingerprint === hash) return this.payoutResponse(prior);
         throw new ConflictException('Payout request already exists');

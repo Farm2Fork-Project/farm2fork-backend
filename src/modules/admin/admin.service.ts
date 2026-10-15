@@ -240,10 +240,26 @@ export class AdminService {
     const page = query.page ?? 1,
       limit = query.limit ?? 20;
     const filter: FilterQuery<UserDocument> = {};
-    if (query.role) filter.role = query.role;
-    if (query.status) filter.isActive = query.status === 'active';
-    if (query.search?.trim()) {
-      const regex = new RegExp(literal(query.search.trim()), 'i');
+    const role = query.role;
+    const status = query.status;
+    const search = query.search;
+    if (role !== undefined) {
+      if (typeof role !== 'string' || !Object.values(UserRole).includes(role))
+        throw new BadRequestException('Unsupported user role filter');
+      filter.role = role;
+    }
+    if (status !== undefined) {
+      if (
+        typeof status !== 'string' ||
+        (status !== 'active' && status !== 'inactive')
+      )
+        throw new BadRequestException('Unsupported user status filter');
+      filter.isActive = status === 'active';
+    }
+    if (search !== undefined && typeof search !== 'string')
+      throw new BadRequestException('User search must be a string');
+    if (search?.trim()) {
+      const regex = new RegExp(literal(search.trim()), 'i');
       filter.$or = [{ email: regex }, { fullName: regex }];
     }
     const [items, total] = await Promise.all([
@@ -372,10 +388,18 @@ export class AdminService {
     const page = query.page ?? 1,
       limit = query.limit ?? 20;
     const filter: FilterQuery<AuditLogDocument> = {};
-    if (query.action) filter.action = query.action;
-    if (query.entity) filter.targetEntity = query.entity;
-    if (query.search?.trim())
-      filter.action = new RegExp(literal(query.search.trim()), 'i');
+    const action = query.action;
+    const entity = query.entity;
+    const search = query.search;
+    if (action !== undefined && typeof action !== 'string')
+      throw new BadRequestException('Audit action filter must be a string');
+    if (entity !== undefined && typeof entity !== 'string')
+      throw new BadRequestException('Audit entity filter must be a string');
+    if (search !== undefined && typeof search !== 'string')
+      throw new BadRequestException('Audit search must be a string');
+    if (action) filter.action = action;
+    if (entity) filter.targetEntity = entity;
+    if (search?.trim()) filter.action = new RegExp(literal(search.trim()), 'i');
     const [items, total] = await Promise.all([
       this.auditModel
         .find(filter)

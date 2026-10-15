@@ -1,4 +1,8 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
@@ -386,6 +390,105 @@ describe('MarketplaceService', () => {
           price: 999,
         }),
       ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it.each([
+      'expectedQuantity',
+      'quantity',
+      'price',
+      'name',
+      'category',
+      'description',
+      'unit',
+      'qualityGrade',
+      'status',
+      'images',
+    ])(
+      'rejects operator objects in %s before editing a listing',
+      async (field) => {
+        const product = fakeProduct();
+        model.findById.mockReturnValue({
+          exec: jest.fn().mockResolvedValue(product),
+        });
+        model.findOneAndUpdate.mockReturnValue({
+          exec: jest.fn().mockResolvedValue(product),
+        });
+        await expect(
+          service.update(product.id, FARMER, {
+            quantity: 12,
+            [field]: { $ne: null },
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+        expect(product.save).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      'farmerId',
+      'adminHidden',
+      'initialBlockchainRecordId',
+      '$inc',
+      'quantity.$gt',
+    ])(
+      'rejects unexpected update field %s instead of persisting it',
+      async (field) => {
+        const product = fakeProduct();
+        model.findById.mockReturnValue({
+          exec: jest.fn().mockResolvedValue(product),
+        });
+        model.findOneAndUpdate.mockReturnValue({
+          exec: jest.fn().mockResolvedValue(product),
+        });
+        await expect(
+          service.update(product.id, FARMER, {
+            quantity: 12,
+            [field]: 'unexpected',
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+      },
+    );
+
+    it('persists explicit mutable stock-edit fields without the concurrency token', async () => {
+      const product = fakeProduct({
+        _id: new Types.ObjectId('6a2fe77bb77795516febc287'),
+      });
+      model.findById.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(product),
+      });
+      model.findOneAndUpdate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(product),
+      });
+      await service.update(product.id, FARMER, {
+        name: 'Fresh tomatoes',
+        category: 'vegetables',
+        description: '',
+        price: 0,
+        quantity: 0,
+        unit: ProductUnit.Kg,
+        images: [],
+        qualityGrade: QualityGrade.B,
+        status: ProductStatus.SoldOut,
+        expectedQuantity: 500,
+      });
+      expect(model.findOneAndUpdate).toHaveBeenCalledWith(
+        { _id: product._id, farmerId: product.farmerId, quantity: 500 },
+        {
+          $set: {
+            name: 'Fresh tomatoes',
+            category: 'vegetables',
+            description: '',
+            price: 0,
+            quantity: 0,
+            unit: 'kg',
+            images: [],
+            qualityGrade: 'B',
+            status: 'sold_out',
+          },
+        },
+        { new: true, runValidators: true },
+      );
     });
 
     it('rejects an explicit stock edit when the observed quantity has changed', async () => {

@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import {
   Payment,
   PaymentSchema,
@@ -86,6 +87,18 @@ describe('Admin operations against a replica set', () => {
     await db?.close();
     await repl?.stop();
   });
+
+  it.each(['role', 'action', 'entity'])(
+    'rejects operator objects in direct-service %s filters',
+    async (field) => {
+      const operator = { $ne: null };
+      const result =
+        field === 'role'
+          ? service.users({ role: operator as never })
+          : service.audit({ [field]: operator });
+      await expect(result).rejects.toBeInstanceOf(BadRequestException);
+    },
+  );
 
   it('paginates literal user searches and never returns credentials or device identifiers', async () => {
     await db.model(User.name).create([
