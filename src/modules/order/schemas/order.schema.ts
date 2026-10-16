@@ -34,6 +34,10 @@ export class OrderItem {
   @Prop({ required: true })
   productName!: string;
 
+  /** Unit snapshot; absent on legacy orders. */
+  @Prop({ type: String, enum: ['kg', 'ton', 'dozen', 'piece', 'litre'] })
+  unit?: string;
+
   @Prop({ required: true, min: 0 })
   quantity!: number;
 
@@ -147,6 +151,10 @@ export class Order {
     default: OrderStatus.Pending,
   })
   status!: OrderStatus;
+
+  /** Set atomically before a gateway session starts; blocks draft cancellation. */
+  @Prop({ type: Date })
+  paymentStartedAt?: Date;
 
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Payment' })
   paymentId?: Types.ObjectId;

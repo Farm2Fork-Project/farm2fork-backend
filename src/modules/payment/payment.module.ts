@@ -1,3 +1,4 @@
+import { User, UserSchema } from '../auth/schemas/user.schema';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { BlockchainModule } from '../blockchain/blockchain.module';
@@ -16,7 +17,10 @@ import { Payment, PaymentSchema } from './schemas/payment.schema';
  */
 @Module({
   imports: [
-    MongooseModule.forFeature([{ name: Payment.name, schema: PaymentSchema }]),
+    MongooseModule.forFeature([
+      { name: Payment.name, schema: PaymentSchema },
+      { name: User.name, schema: UserSchema },
+    ]),
     OrderModule,
     MarketplaceModule,
     BlockchainModule,

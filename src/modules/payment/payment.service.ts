@@ -1,3 +1,4 @@
+import { User, UserDocument } from '../auth/schemas/user.schema';
 import {
   BadRequestException,
   ForbiddenException,
@@ -76,6 +77,7 @@ export class PaymentService {
     private readonly notifications: NotificationService,
     private readonly transport: TransportService,
     private readonly safepayClient: SafepayClient,
+    @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
   ) {}
 
   async initiate(
@@ -89,6 +91,45 @@ export class PaymentService {
     }
     if (order.status !== OrderStatus.Pending) {
       throw new BadRequestException('Only pending orders can be paid');
+    }
+
+    const session = await this.connection.startSession();
+    try {
+      await session.withTransaction(async () => {
+        // Real writes on the same User documents as admin suspension make
+        // concurrent suspension retry against the committed payment claim.
+        for (const [accountId, role] of [
+          [order.buyerId, UserRole.Buyer],
+          [order.farmerId, UserRole.Farmer],
+        ] as const) {
+          const active = await this.userModel
+            .updateOne(
+              { _id: accountId, role, isActive: true },
+              { $inc: { __v: 1 } },
+              { session },
+            )
+            .exec();
+          if (active.matchedCount !== 1)
+            throw new BadRequestException(
+              'Buyer and farmer accounts must be active to start payment',
+            );
+        }
+        // Also serialize with draft cancellation before opening a payable
+        // gateway session. Never clear an uncertain gateway attempt's claim.
+        const claimed = await this.orderModel
+          .updateOne(
+            { _id: order._id, status: OrderStatus.Pending },
+            { $set: { paymentStartedAt: new Date() } },
+            { session },
+          )
+          .exec();
+        if (claimed.matchedCount !== 1)
+          throw new BadRequestException(
+            'This order is no longer available for payment. Refresh its status.',
+          );
+      });
+    } finally {
+      await session.endSession();
     }
 
     const existing = await this.paymentModel
@@ -461,10 +502,9 @@ export class PaymentService {
       throw new BadRequestException('Only successful payments can be refunded');
     }
 
-    payment.status = PaymentStatus.Refunded;
-    payment.refundedAt = new Date();
-    await payment.save();
-    return this.toResponse(payment);
+    throw new BadRequestException(
+      'Record an evidenced external refund through delivery administration; changing a database status does not return money.',
+    );
   }
 
   // --- internals -------------------------------------------------------------
@@ -486,7 +526,7 @@ export class PaymentService {
 
   private toResponse(payment: PaymentDocument): PaymentResponseDto {
     return {
-      id: payment.id,
+      id: String(payment.id),
       orderId: payment.orderId.toHexString(),
       buyerId: payment.buyerId.toHexString(),
       amount: payment.amount,

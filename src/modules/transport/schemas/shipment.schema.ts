@@ -56,6 +56,31 @@ const ShipmentStatusHistoryEntrySchema = SchemaFactory.createForClass(
   ShipmentStatusHistoryEntry,
 );
 
+@Schema({ _id: false })
+export class DeliveryIssue {
+  @Prop({ required: true }) reason!: string;
+  @Prop() note?: string;
+  @Prop({ required: true, type: String, enum: ShipmentStatus })
+  stage!: ShipmentStatus;
+  @Prop({ required: true }) reportedAt!: Date;
+  @Prop() resolvedAt?: Date;
+  @Prop() resolution?: string;
+}
+const DeliveryIssueSchema = SchemaFactory.createForClass(DeliveryIssue);
+@Schema({ _id: false })
+export class DeliveryAssignment {
+  @Prop({ type: MongooseSchema.Types.ObjectId })
+  fromTransporterId?: Types.ObjectId;
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
+  transporterId!: Types.ObjectId;
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
+  assignedBy!: Types.ObjectId;
+  @Prop({ required: true }) reason!: string;
+  @Prop({ required: true }) timestamp!: Date;
+}
+const DeliveryAssignmentSchema =
+  SchemaFactory.createForClass(DeliveryAssignment);
+
 @Schema({
   collection: 'shipments',
   timestamps: true,
@@ -108,6 +133,12 @@ export class Shipment {
   @Prop()
   actualDelivery?: Date;
 
+  @Prop({ select: false }) proofNonce?: string;
+  @Prop({ default: 0, select: false }) proofFailures!: number;
+  @Prop({ select: false }) proofBlockedUntil?: Date;
+  @Prop({ type: DeliveryIssueSchema }) issue?: DeliveryIssue;
+  @Prop({ type: [DeliveryAssignmentSchema], default: [] })
+  assignmentHistory!: DeliveryAssignment[];
   createdAt!: Date;
   updatedAt!: Date;
 }

@@ -10,6 +10,7 @@ export enum NotificationType {
   DeliveryUpdate = 'delivery_update',
   LoanUpdate = 'loan_update',
   AdminAction = 'admin_action',
+  PayoutRecorded = 'payout_recorded',
   /**
    * A paid order near an available transporter, offered at a fixed delivery
    * fee (owner-approved addition to master context 5.15).

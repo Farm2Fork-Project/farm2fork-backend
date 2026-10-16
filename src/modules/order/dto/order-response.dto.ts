@@ -14,6 +14,9 @@ export class OrderItemResponseDto {
   })
   productName!: string;
 
+  @ApiPropertyOptional()
+  unit?: string;
+
   @ApiProperty({ example: 10 })
   quantity!: number;
 
@@ -43,6 +46,11 @@ export class OrderQuoteResponseDto {
 }
 
 export class OrderResponseDto {
+  @ApiProperty({
+    description:
+      'Only an unpaid draft without a payment session can be cancelled',
+  })
+  canCancel!: boolean;
   @ApiProperty({ example: '6a2fe77bb77795516febc500' })
   id!: string;
 

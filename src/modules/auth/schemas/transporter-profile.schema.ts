@@ -55,6 +55,10 @@ export class TransporterProfile {
   @Prop({ default: true })
   isAvailable!: boolean;
 
+  /** Admin suspension; claims reject this even if an in-flight online request completes. */
+  @Prop({ default: false })
+  dispatchSuspended!: boolean;
+
   /** Last location reported by the app while online (foreground only). */
   @Prop({ type: GeoPointSchema })
   lastLocation?: GeoPoint;

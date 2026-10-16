@@ -1,3 +1,5 @@
+import { User, UserDocument } from '../auth/schemas/user.schema';
+import { Payment, PaymentDocument } from '../payment/schemas/payment.schema';
 import {
   BadRequestException,
   ForbiddenException,
@@ -55,6 +57,9 @@ export class OrderService {
     private readonly farmerProfileModel: Model<FarmerProfileDocument>,
     private readonly systemConfig: SystemConfigService,
     private readonly notifications: NotificationService,
+    @InjectModel(Payment.name)
+    private readonly paymentModel: Model<PaymentDocument>,
+    @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
   ) {}
 
   /** Prices a cart for one farmer without saving anything. */
@@ -140,7 +145,7 @@ export class OrderService {
       if (!product) {
         throw new BadRequestException(`Product ${line.productId} not found`);
       }
-      if (product.status !== ProductStatus.Active) {
+      if (product.adminHidden || product.status !== ProductStatus.Active) {
         throw new BadRequestException(
           `Product ${product.name} is not available`,
         );
@@ -153,6 +158,7 @@ export class OrderService {
         productId: product._id,
         farmerId: product.farmerId,
         productName: product.name,
+        unit: product.unit,
         quantity: line.quantity,
         unitPrice: product.price,
         subtotal: product.price * line.quantity,
@@ -168,6 +174,14 @@ export class OrderService {
       );
     }
     const farmerId = items[0].farmerId;
+    if (
+      !(await this.userModel
+        .exists({ _id: farmerId, role: UserRole.Farmer, isActive: true })
+        .exec())
+    )
+      throw new BadRequestException(
+        'This farm is not available for new orders',
+      );
 
     const farm = await this.farmerProfileModel
       .findOne({ userId: farmerId })
@@ -226,7 +240,7 @@ export class OrderService {
     ]);
 
     return {
-      data: items.map((o) => this.toResponse(o)),
+      data: await this.toResponses(items),
       total,
       page,
       limit,
@@ -235,7 +249,7 @@ export class OrderService {
   }
 
   async findOne(id: string, user: RequestUser): Promise<OrderResponseDto> {
-    return this.toResponse(await this.getVisibleOrder(id, user));
+    return (await this.toResponses([await this.getVisibleOrder(id, user)]))[0];
   }
 
   async cancel(id: string, user: RequestUser): Promise<OrderResponseDto> {
@@ -243,17 +257,38 @@ export class OrderService {
     if (order.buyerId.toHexString() !== user.id) {
       throw new ForbiddenException('You can only cancel your own orders');
     }
+    if (order.status === OrderStatus.Cancelled) return this.toResponse(order);
     if (
-      order.status === OrderStatus.Delivered ||
-      order.status === OrderStatus.Cancelled
+      order.status !== OrderStatus.Pending ||
+      order.paymentStartedAt ||
+      order.paymentId ||
+      (await this.paymentModel.exists({ orderId: order._id }).exec())
     ) {
       throw new BadRequestException(
-        `An order with status "${order.status}" cannot be cancelled`,
+        'Only unpaid drafts without a payment session can be cancelled. Resume payment or contact support for an existing payment.',
       );
     }
-    order.status = OrderStatus.Cancelled;
-    await order.save();
-    return this.toResponse(order);
+    // Races with PaymentService.initiate on the SAME order document. A gateway
+    // attempt wins by setting paymentStartedAt; cancellation wins by changing
+    // status, so both cannot succeed.
+    const cancelled = await this.orderModel
+      .findOneAndUpdate(
+        {
+          _id: order._id,
+          buyerId: order.buyerId,
+          status: OrderStatus.Pending,
+          paymentStartedAt: { $exists: false },
+          paymentId: { $exists: false },
+        },
+        { $set: { status: OrderStatus.Cancelled } },
+        { new: true },
+      )
+      .exec();
+    if (!cancelled)
+      throw new BadRequestException(
+        'This order changed while you were cancelling it. Refresh its status.',
+      );
+    return this.toResponse(cancelled);
   }
 
   // --- internals -------------------------------------------------------------
@@ -310,6 +345,33 @@ export class OrderService {
     return order;
   }
 
+  private async toResponses(
+    orders: OrderDocument[],
+  ): Promise<OrderResponseDto[]> {
+    const draftIds = orders
+      .filter(
+        (order) =>
+          order.status === OrderStatus.Pending &&
+          !order.paymentStartedAt &&
+          !order.paymentId,
+      )
+      .map((order) => order._id);
+    const sessions = draftIds.length
+      ? await this.paymentModel
+          .distinct('orderId', { orderId: { $in: draftIds } })
+          .exec()
+      : [];
+    const blocked = new Set(sessions.map((id) => String(id)));
+    return orders.map((order) => ({
+      ...this.toResponse(order),
+      canCancel:
+        order.status === OrderStatus.Pending &&
+        !order.paymentStartedAt &&
+        !order.paymentId &&
+        !blocked.has(String(order._id)),
+    }));
+  }
+
   private toResponse(order: OrderDocument): OrderResponseDto {
     return {
       id: order.id as string,
@@ -338,6 +400,10 @@ export class OrderService {
         lng: order.shippingAddress.lng,
       },
       status: order.status,
+      canCancel:
+        order.status === OrderStatus.Pending &&
+        !order.paymentStartedAt &&
+        !order.paymentId,
       paymentId: order.paymentId?.toHexString(),
       shipmentId: order.shipmentId?.toHexString(),
       createdAt: order.createdAt.toISOString(),

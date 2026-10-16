@@ -1,3 +1,4 @@
+import { activeDeliveryFilter } from './active-delivery';
 import {
   BadRequestException,
   ConflictException,
@@ -5,9 +6,11 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Connection, FilterQuery, Model, Types } from 'mongoose';
+import { User, UserDocument } from '../auth/schemas/user.schema';
 import { UserRole } from '../../common/enums/user-role.enum';
 import {
   LatLng,
@@ -61,12 +64,6 @@ const ESTIMATED_DELIVERY_MS = 48 * 60 * 60 * 1000;
 /** How many nearby transporters are pinged for one new delivery. */
 const MAX_OFFER_RECIPIENTS = 30;
 const MAX_OFFERS_LISTED = 50;
-
-const ACTIVE_SHIPMENT_STATUSES = [
-  ShipmentStatus.Assigned,
-  ShipmentStatus.PickedUp,
-  ShipmentStatus.InTransit,
-];
 
 const NEXT_SHIPMENT_STATUSES: Record<ShipmentStatus, ShipmentStatus[]> = {
   [ShipmentStatus.Assigned]: [ShipmentStatus.PickedUp, ShipmentStatus.Failed],
@@ -124,6 +121,9 @@ export class TransportService {
     private readonly connection: Connection,
     private readonly systemConfig: SystemConfigService,
     private readonly notifications: NotificationService,
+    @Optional()
+    @InjectModel(User.name)
+    private readonly userModel?: Model<UserDocument>,
   ) {}
 
   // --- transporter availability ---------------------------------------------
@@ -137,7 +137,7 @@ export class TransportService {
       this.findActiveShipment(transporterId),
     ]);
     return {
-      online: profile.isAvailable,
+      online: profile.isAvailable && !profile.dispatchSuspended,
       locationFresh: this.isLocationFresh(profile, settings),
       lastLocationAt: profile.lastLocationAt?.toISOString(),
       activeShipmentId: active?._id.toHexString(),
@@ -182,6 +182,7 @@ export class TransportService {
       this.findActiveShipment(transporterId),
     ]);
     if (
+      profile.dispatchSuspended ||
       !profile.isAvailable ||
       active ||
       !profile.lastLocation ||
@@ -268,6 +269,7 @@ export class TransportService {
     const candidates = await this.transporterProfileModel
       .find({
         isAvailable: true,
+        dispatchSuspended: { $ne: true },
         lastLocationAt: { $gte: this.freshnessCutoff(settings) },
         userId: { $nin: order.declinedBy },
         lastLocation: {
@@ -286,7 +288,7 @@ export class TransportService {
     const busy = await this.shipmentModel
       .distinct('transporterId', {
         transporterId: { $in: candidates.map((c) => c.userId) },
-        status: { $in: ACTIVE_SHIPMENT_STATUSES },
+        ...activeDeliveryFilter(),
       })
       .exec();
     const busyIds = new Set(busy.map((id) => String(id)));
@@ -351,7 +353,7 @@ export class TransportService {
         const active = await this.shipmentModel
           .exists({
             transporterId: transporterObjectId,
-            status: { $in: ACTIVE_SHIPMENT_STATUSES },
+            ...activeDeliveryFilter(),
           })
           .session(session)
           .exec();
@@ -360,7 +362,7 @@ export class TransportService {
             'Finish your current delivery before accepting another',
           );
         }
-        if (!transporter.isAvailable) {
+        if (transporter.dispatchSuspended || !transporter.isAvailable) {
           throw new ConflictException('Go online to accept deliveries');
         }
 
@@ -499,7 +501,10 @@ export class TransportService {
       .find(filter)
       .sort({ createdAt: -1 })
       .exec();
-    return shipments.map((shipment) => this.toResponse(shipment));
+    return this.withContacts(
+      shipments.map((shipment) => this.toResponse(shipment)),
+      user,
+    );
   }
 
   async findOne(id: string, user: RequestUser): Promise<ShipmentResponseDto> {
@@ -509,7 +514,53 @@ export class TransportService {
     const shipment = await this.shipmentModel.findById(id).exec();
     if (!shipment) throw new NotFoundException('Shipment not found');
     await this.assertReadAccess(shipment, user);
-    return this.toResponse(shipment);
+    return (await this.withContacts([this.toResponse(shipment)], user))[0];
+  }
+
+  private async withContacts(
+    shipments: ShipmentResponseDto[],
+    user: RequestUser,
+  ) {
+    if (
+      !this.userModel ||
+      user.role !== UserRole.Transporter ||
+      shipments.length === 0
+    )
+      return shipments;
+    const orders = await this.orderModel
+      .find({ _id: { $in: shipments.map((item) => item.orderId) } })
+      .select('buyerId farmerId')
+      .lean()
+      .exec();
+    const ids = [
+      ...new Set(
+        orders.flatMap((order) => [
+          String(order.buyerId),
+          String(order.farmerId),
+        ]),
+      ),
+    ];
+    const users = await this.userModel
+      .find({ _id: { $in: ids } })
+      .select('fullName phone')
+      .lean()
+      .exec();
+    const contact = (id: Types.ObjectId) => {
+      const account = users.find((item) => String(item._id) === String(id));
+      return account
+        ? { name: account.fullName, phone: account.phone }
+        : undefined;
+    };
+    return shipments.map((item) => {
+      const order = orders.find((order) => String(order._id) === item.orderId);
+      return order
+        ? {
+            ...item,
+            pickupContact: contact(order.farmerId),
+            deliveryContact: contact(order.buyerId),
+          }
+        : item;
+    });
   }
 
   async updateStatus(
@@ -524,6 +575,12 @@ export class TransportService {
       throw new NotFoundException('Shipment not found');
     }
 
+    if (dto.status === ShipmentStatus.Delivered)
+      throw new BadRequestException(
+        'Verify the buyer delivery code to complete this delivery',
+      );
+    if (dto.status === ShipmentStatus.Failed)
+      throw new BadRequestException('Report a delivery issue with a reason');
     const session = await this.connection.startSession();
     let result: { shipment: ShipmentDocument; order: OrderDocument };
     try {
@@ -633,6 +690,7 @@ export class TransportService {
       items: order.items.map((item) => ({
         productName: item.productName,
         quantity: item.quantity,
+        unit: item.unit,
       })),
       pickupCity: city,
       pickupProvince: province,
@@ -672,7 +730,7 @@ export class TransportService {
     return this.shipmentModel
       .findOne({
         transporterId: new Types.ObjectId(transporterId),
-        status: { $in: ACTIVE_SHIPMENT_STATUSES },
+        ...activeDeliveryFilter(),
       })
       .select('_id')
       .lean()
@@ -762,7 +820,7 @@ export class TransportService {
     return [address?.city, address?.province].filter(Boolean).join(', ');
   }
 
-  private async createShipmentSupplyChainEvents(
+  async createShipmentSupplyChainEvents(
     order: OrderDocument,
     shipment: ShipmentDocument,
     eventType: string,
@@ -770,6 +828,7 @@ export class TransportService {
     actorId: Types.ObjectId,
     timestamp: Date,
     session: ClientSession,
+    actorRole: UserRole = UserRole.Transporter,
   ): Promise<void> {
     const productIds = [
       ...new Map(
@@ -793,7 +852,7 @@ export class TransportService {
             eventType,
             location,
             actorId,
-            actorRole: UserRole.Transporter,
+            actorRole,
             timestamp,
           },
         },
@@ -812,7 +871,7 @@ export class TransportService {
     );
   }
 
-  private toResponse(shipment: ShipmentDocument): ShipmentResponseDto {
+  toResponse(shipment: ShipmentDocument): ShipmentResponseDto {
     const address = (a: ShipmentDocument['pickupAddress']) => ({
       street: a?.street,
       city: a?.city,
@@ -822,12 +881,22 @@ export class TransportService {
       lng: a?.lng,
     });
     return {
-      id: shipment.id,
+      id: String(shipment.id),
       orderId: shipment.orderId.toHexString(),
       transporterId: shipment.transporterId!.toHexString(),
       status: shipment.status,
       pickupAddress: address(shipment.pickupAddress),
       deliveryAddress: address(shipment.deliveryAddress),
+      issue: shipment.issue,
+      assignmentHistory: shipment.assignmentHistory?.map((entry) => ({
+        reason: entry.reason,
+        transporterId: String(entry.transporterId),
+        fromTransporterId: entry.fromTransporterId
+          ? String(entry.fromTransporterId)
+          : undefined,
+        assignedBy: String(entry.assignedBy),
+        timestamp: entry.timestamp.toISOString(),
+      })),
       statusHistory: shipment.statusHistory.map((entry) => ({
         status: entry.status,
         timestamp: entry.timestamp.toISOString(),

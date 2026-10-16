@@ -1,3 +1,4 @@
+import { User } from '../auth/schemas/user.schema';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import {
   ForbiddenException,
@@ -42,6 +43,7 @@ const orderId = '66a2fe77bb77795516febc50';
 const makeOrder = (overrides: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(orderId),
   buyerId: new Types.ObjectId(buyerId),
+  farmerId: new Types.ObjectId(),
   grandTotal: 870,
   status: OrderStatus.Pending,
   ...overrides,
@@ -64,7 +66,7 @@ const makePayment = (overrides: Record<string, unknown> = {}) => ({
 
 describe('PaymentService', () => {
   let service: PaymentService;
-  let orderModel: { findById: jest.Mock };
+  let orderModel: { findById: jest.Mock; updateOne: jest.Mock };
   let paymentModel: {
     findOne: jest.Mock;
     findById: jest.Mock;
@@ -88,7 +90,12 @@ describe('PaymentService', () => {
   };
 
   beforeEach(async () => {
-    orderModel = { findById: jest.fn() };
+    orderModel = {
+      findById: jest.fn(),
+      updateOne: jest.fn().mockReturnValue({
+        exec: jest.fn().mockResolvedValue({ matchedCount: 1 }),
+      }),
+    };
     paymentModel = {
       findOne: jest.fn(),
       findById: jest.fn(),
@@ -127,6 +134,14 @@ describe('PaymentService', () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentService,
+        {
+          provide: getModelToken(User.name),
+          useValue: {
+            updateOne: jest.fn().mockReturnValue({
+              exec: jest.fn().mockResolvedValue({ matchedCount: 1 }),
+            }),
+          },
+        },
         { provide: getModelToken(Order.name), useValue: orderModel },
         { provide: getModelToken(Payment.name), useValue: paymentModel },
         { provide: getModelToken(Product.name), useValue: productModel },
@@ -524,20 +539,16 @@ describe('PaymentService', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('persists an admin refund without changing inventory', async () => {
+  it('rejects database-only refunds without evidence of an actual money return', async () => {
     const payment = makePayment({
       id: new Types.ObjectId().toHexString(),
       status: PaymentStatus.Success,
     });
-    payment.save.mockResolvedValue(payment);
     paymentModel.findById.mockReturnValue(query(payment));
-
-    const result = await service.refund(payment.id);
-
-    expect(result.status).toBe(PaymentStatus.Refunded);
-    expect(payment.refundedAt).toBeInstanceOf(Date);
-    expect(payment.save).toHaveBeenCalledTimes(1);
-    expect(productModel.updateOne).not.toHaveBeenCalled();
+    await expect(service.refund(payment.id)).rejects.toThrow(
+      /external refund/i,
+    );
+    expect(payment.save).not.toHaveBeenCalled();
   });
 
   it('does not refund a payment that was never successful', async () => {

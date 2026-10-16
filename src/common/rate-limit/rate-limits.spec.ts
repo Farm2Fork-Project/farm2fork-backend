@@ -27,7 +27,9 @@ describe('rate limits', () => {
       ],
     }).compile();
     app = moduleRef.createNestApplication();
-    await app.init();
+    // Keep all requests on one listener; Supertest otherwise rebinds an ephemeral
+    // port between requests when handed an unbound server.
+    await app.listen(0, '127.0.0.1');
   });
 
   afterEach(async () => {

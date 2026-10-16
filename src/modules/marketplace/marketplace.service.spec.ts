@@ -1,4 +1,8 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
@@ -71,6 +75,7 @@ describe('MarketplaceService', () => {
     find: jest.Mock;
     findById: jest.Mock;
     countDocuments: jest.Mock;
+    findOneAndUpdate: jest.Mock;
   };
   let blockchainModel: { create: jest.Mock; find: jest.Mock };
   let farmerProfileModel: { findOne: jest.Mock; find: jest.Mock };
@@ -100,6 +105,7 @@ describe('MarketplaceService', () => {
       find: jest.fn(),
       findById: jest.fn(),
       countDocuments: jest.fn(),
+      findOneAndUpdate: jest.fn(),
     };
     blockchainModel = {
       create: jest.fn((docs: Record<string, unknown>[]) =>
@@ -300,6 +306,37 @@ describe('MarketplaceService', () => {
       expect(result.totalPages).toBe(1);
     });
 
+    it('limits browse to confirmed origin records before paginating', async () => {
+      const confirmedId = new Types.ObjectId();
+      const chain = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([]),
+      };
+      model.find.mockReturnValue(chain);
+      model.countDocuments.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(0),
+      });
+      blockchainModel.find.mockReturnValueOnce(
+        leanQuery([{ _id: confirmedId }]),
+      );
+
+      await service.findAll({ verifiedOrigin: true });
+
+      expect(blockchainModel.find.mock.calls[0][0]).toMatchObject({
+        status: BlockchainTxStatus.Confirmed,
+      });
+      expect(model.find.mock.calls[0][0].initialBlockchainRecordId).toEqual({
+        $in: [confirmedId],
+      });
+      expect(
+        model.countDocuments.mock.calls[0][0].initialBlockchainRecordId,
+      ).toEqual({
+        $in: [confirmedId],
+      });
+    });
+
     it('never returns deactivated listings to the public browse', async () => {
       const chain = {
         sort: jest.fn().mockReturnThis(),
@@ -353,6 +390,130 @@ describe('MarketplaceService', () => {
           price: 999,
         }),
       ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it.each([
+      'expectedQuantity',
+      'quantity',
+      'price',
+      'name',
+      'category',
+      'description',
+      'unit',
+      'qualityGrade',
+      'status',
+      'images',
+    ])(
+      'rejects operator objects in %s before editing a listing',
+      async (field) => {
+        const product = fakeProduct();
+        model.findById.mockReturnValue({
+          exec: jest.fn().mockResolvedValue(product),
+        });
+        model.findOneAndUpdate.mockReturnValue({
+          exec: jest.fn().mockResolvedValue(product),
+        });
+        await expect(
+          service.update(product.id, FARMER, {
+            quantity: 12,
+            [field]: { $ne: null },
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+        expect(product.save).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      'farmerId',
+      'adminHidden',
+      'initialBlockchainRecordId',
+      '$inc',
+      'quantity.$gt',
+    ])(
+      'rejects unexpected update field %s instead of persisting it',
+      async (field) => {
+        const product = fakeProduct();
+        model.findById.mockReturnValue({
+          exec: jest.fn().mockResolvedValue(product),
+        });
+        model.findOneAndUpdate.mockReturnValue({
+          exec: jest.fn().mockResolvedValue(product),
+        });
+        await expect(
+          service.update(product.id, FARMER, {
+            quantity: 12,
+            [field]: 'unexpected',
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+      },
+    );
+
+    it('persists explicit mutable stock-edit fields without the concurrency token', async () => {
+      const product = fakeProduct({
+        _id: new Types.ObjectId('6a2fe77bb77795516febc287'),
+      });
+      model.findById.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(product),
+      });
+      model.findOneAndUpdate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(product),
+      });
+      await service.update(product.id, FARMER, {
+        name: 'Fresh tomatoes',
+        category: 'vegetables',
+        description: '',
+        price: 0,
+        quantity: 0,
+        unit: ProductUnit.Kg,
+        images: [],
+        qualityGrade: QualityGrade.B,
+        status: ProductStatus.SoldOut,
+        expectedQuantity: 500,
+      });
+      expect(model.findOneAndUpdate).toHaveBeenCalledWith(
+        { _id: product._id, farmerId: product.farmerId, quantity: 500 },
+        {
+          $set: {
+            name: 'Fresh tomatoes',
+            category: 'vegetables',
+            description: '',
+            price: 0,
+            quantity: 0,
+            unit: 'kg',
+            images: [],
+            qualityGrade: 'B',
+            status: 'sold_out',
+          },
+        },
+        { new: true, runValidators: true },
+      );
+    });
+
+    it('rejects an explicit stock edit when the observed quantity has changed', async () => {
+      model.findById.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(
+          fakeProduct({
+            _id: new Types.ObjectId('6a2fe77bb77795516febc287'),
+            quantity: 8,
+          }),
+        ),
+      });
+      model.findOneAndUpdate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(null),
+      });
+      await expect(
+        service.update('6a2fe77bb77795516febc287', FARMER, {
+          quantity: 12,
+          expectedQuantity: 10,
+        }),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(model.findOneAndUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ quantity: 10 }),
+        { $set: { quantity: 12 } },
+        { new: true, runValidators: true },
+      );
     });
 
     it('applies only provided fields and saves', async () => {

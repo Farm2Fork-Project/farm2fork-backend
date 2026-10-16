@@ -54,6 +54,24 @@ export class ShipmentResponseDto {
   @ApiProperty()
   transporterId!: string;
 
+  issue?: {
+    reason: string;
+    note?: string;
+    stage: string;
+    reportedAt: Date;
+    resolvedAt?: Date;
+    resolution?: string;
+  };
+  assignmentHistory?: {
+    transporterId: string;
+    fromTransporterId?: string;
+    assignedBy: string;
+    timestamp: string;
+    reason: string;
+  }[];
+  pickupContact?: { name?: string; phone?: string };
+  deliveryContact?: { name?: string; phone?: string };
+
   @ApiProperty({ enum: ShipmentStatus })
   status!: ShipmentStatus;
 
@@ -94,6 +112,7 @@ export class OfferPointDto {
 export class OfferItemDto {
   @ApiProperty() productName!: string;
   @ApiProperty() quantity!: number;
+  @ApiPropertyOptional() unit?: string;
 }
 
 /**

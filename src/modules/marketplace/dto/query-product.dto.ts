@@ -1,6 +1,13 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import { IsEnum, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsEnum,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
 import { PaginationDto } from '../../../common/dtos/pagination.dto';
 import {
   ProductStatus,
@@ -67,6 +74,21 @@ export class QueryProductDto extends PaginationDto {
   @IsNumber()
   @Min(0)
   maxPrice?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Only listings whose origin record is confirmed on the ledger. Applied before pagination.',
+  })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    value === 'true' || value === true
+      ? true
+      : value === 'false' || value === false
+        ? false
+        : value,
+  )
+  @IsBoolean()
+  verifiedOrigin?: boolean;
 
   @ApiPropertyOptional({
     enum: ProductSortBy,
