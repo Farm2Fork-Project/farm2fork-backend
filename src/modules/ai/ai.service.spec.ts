@@ -18,6 +18,7 @@ import {
 } from './dto/ai.dto';
 import { validate } from 'class-validator';
 import { AiPrediction, PredictionType } from './schemas/ai-prediction.schema';
+import { FarmerProfile } from '../auth/schemas/farmer-profile.schema';
 
 const FARMER = '6a2fe77bb77795516febc111';
 
@@ -39,6 +40,7 @@ const image = (overrides: Record<string, unknown> = {}) => ({
 describe('AiService', () => {
   let service: AiService;
   let predictionModel: { create: jest.Mock };
+  let farmerProfileModel: { city?: string; findOne: jest.Mock };
   let fetchMock: jest.SpyInstance;
   let config: Record<string, string | undefined>;
 
@@ -47,6 +49,20 @@ describe('AiService', () => {
       create: jest.fn((doc: Record<string, unknown>) =>
         Promise.resolve({ ...doc, _id: new Types.ObjectId() }),
       ),
+    };
+    farmerProfileModel = {
+      findOne: jest.fn(() => ({
+        select: () => ({
+          lean: () => ({
+            exec: () =>
+              Promise.resolve(
+                farmerProfileModel.city
+                  ? { farmLocation: { city: farmerProfileModel.city } }
+                  : null,
+              ),
+          }),
+        }),
+      })),
     };
     config = {
       AI_SERVICE_URL: 'http://ai.internal:8000/',
@@ -59,6 +75,10 @@ describe('AiService', () => {
         {
           provide: getModelToken(AiPrediction.name),
           useValue: predictionModel,
+        },
+        {
+          provide: getModelToken(FarmerProfile.name),
+          useValue: farmerProfileModel,
         },
         { provide: ConfigService, useValue: { get: (k: string) => config[k] } },
       ],
@@ -134,6 +154,8 @@ describe('AiService', () => {
           crop,
           cropSupported: true,
           lowConfidence: false,
+          needsReview: false,
+          reviewReason: null,
           modelStatus: 'trained',
           modelVersion: 'grade-cond-efficientnet_b0-1a2b3c4d',
         }),
@@ -165,6 +187,75 @@ describe('AiService', () => {
       );
     },
   );
+
+  it.each([
+    ['low_confidence', 'low_confidence'],
+    ['unfamiliar_photo', 'unfamiliar_photo'],
+  ] as const)(
+    'withholds a %s grade from the farmer but stores the raw output',
+    async (reviewReason, expected) => {
+      fetchMock.mockResolvedValue(
+        jsonResponse(200, {
+          qualityGrade: 'A',
+          confidenceScore: 0.97,
+          probabilities: { A: 0.97, B: 0.01, C: 0.01, D: 0.01 },
+          crop: 'mango',
+          cropSupported: true,
+          lowConfidence: false,
+          needsReview: true,
+          reviewReason,
+          photoSimilarity: 0.31,
+          modelStatus: 'trained',
+          modelVersion: 'grade-only-test',
+        }),
+      );
+
+      const result = await service.checkQuality(FARMER, 'mango', image());
+
+      expect(result).toMatchObject({
+        modelGrade: null,
+        suggestedListingGrade: null,
+        probabilities: {},
+        needsReview: true,
+        reviewReason: expected,
+        lowConfidence: true,
+      });
+      expect(predictionModel.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          modelGrade: 'A',
+          reviewReason: expected,
+          photoSimilarity: 0.31,
+        }),
+      );
+      expect(
+        predictionModel.create.mock.calls[0][0].qualityGrade,
+      ).toBeUndefined();
+    },
+  );
+
+  it('fails closed when a trained service does not report photo checks', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        qualityGrade: 'B',
+        confidenceScore: 0.9,
+        probabilities: { A: 0.05, B: 0.9, C: 0.03, D: 0.02 },
+        crop: 'wheat',
+        cropSupported: true,
+        lowConfidence: false,
+        modelStatus: 'trained',
+        modelVersion: 'grade-only-old',
+      }),
+    );
+
+    const result = await service.checkQuality(FARMER, 'wheat', image());
+
+    expect(result).toMatchObject({
+      modelGrade: null,
+      suggestedListingGrade: null,
+      needsReview: true,
+      reviewReason: 'photo_check_unavailable',
+    });
+  });
 
   it('never suggests a listing grade for a D and keeps the enum-safe field empty', async () => {
     fetchMock.mockResolvedValue(
@@ -205,15 +296,20 @@ describe('AiService', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('suggests a rule-based price and stores it', async () => {
+  it("returns a dated official price for the farmer's own market and stores it", async () => {
+    farmerProfileModel.city = 'Faisalabad';
     fetchMock.mockResolvedValue(
       jsonResponse(200, {
-        predictedMinPrice: 198,
-        predictedMaxPrice: 418,
-        confidenceScore: 0.45,
-        modelVersion: 'price-rules-v1',
-        method: 'rule_based',
-        basis: 'crop',
+        predictedMinPrice: 305,
+        predictedMaxPrice: 305,
+        modelVersion: 'amis-punjab-2026-10-22',
+        method: 'official_wholesale',
+        commodity: 'Rice Basmati Super (New)',
+        observedOn: '2026-10-22',
+        marketScope: 'Faisalabad',
+        marketCount: 1,
+        source: 'AMIS Punjab',
+        sourceUrl: 'http://www.amis.pk',
       }),
     );
 
@@ -223,17 +319,24 @@ describe('AiService', () => {
       unit: ProductUnit.Kg,
     });
 
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      productName: 'Basmati Rice',
+      location: 'Faisalabad',
+    });
     expect(result).toMatchObject({
-      predictedMinPrice: 198,
-      predictedMaxPrice: 418,
-      method: 'rule_based',
+      predictedMinPrice: 305,
+      method: 'official_wholesale',
+      observedOn: '2026-10-22',
+      marketScope: 'Faisalabad',
+      source: 'AMIS Punjab',
       unit: 'kg',
     });
     expect(predictionModel.create).toHaveBeenCalledWith(
       expect.objectContaining({
         predictionType: PredictionType.Price,
-        predictedMinPrice: 198,
-        modelVersion: 'price-rules-v1',
+        predictedMinPrice: 305,
+        modelVersion: 'amis-punjab-2026-10-22',
       }),
     );
   });

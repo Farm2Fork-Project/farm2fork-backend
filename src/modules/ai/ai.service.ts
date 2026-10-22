@@ -10,6 +10,10 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import {
+  FarmerProfile,
+  FarmerProfileDocument,
+} from '../auth/schemas/farmer-profile.schema';
 import { QualityGrade } from '../marketplace/schemas/product.schema';
 import {
   AiStatusResponseDto,
@@ -19,6 +23,7 @@ import {
   PriceSuggestionRequestDto,
   PriceSuggestionResponseDto,
   QualityCheckResponseDto,
+  QualityReviewReason,
 } from './dto/ai.dto';
 import {
   AiPrediction,
@@ -43,6 +48,10 @@ interface ServiceQuality {
   crop: GradableCrop;
   cropSupported: boolean;
   lowConfidence: boolean;
+  /** Absent from AI services that predate photo checks. */
+  needsReview?: boolean;
+  reviewReason?: QualityReviewReason | null;
+  photoSimilarity?: number | null;
   modelStatus: ModelStatus;
   modelVersion: string;
 }
@@ -50,10 +59,14 @@ interface ServiceQuality {
 interface ServicePrice {
   predictedMinPrice: number;
   predictedMaxPrice: number;
-  confidenceScore: number;
   modelVersion: string;
-  method: 'rule_based';
-  basis: 'crop' | 'category';
+  method: 'official_wholesale';
+  commodity: string;
+  observedOn: string;
+  marketScope: string;
+  marketCount: number;
+  source: string;
+  sourceUrl: string;
 }
 
 /**
@@ -68,6 +81,8 @@ export class AiService {
   constructor(
     @InjectModel(AiPrediction.name)
     private readonly predictionModel: Model<AiPredictionDocument>,
+    @InjectModel(FarmerProfile.name)
+    private readonly farmerProfileModel: Model<FarmerProfileDocument>,
     private readonly config: ConfigService,
   ) {}
 
@@ -122,7 +137,17 @@ export class AiService {
       body: form,
     });
 
+    // A trained grade is shown only when the service positively cleared it:
+    // an older service without photo checks fails closed into review.
+    const reviewReason: QualityReviewReason | null =
+      result.modelStatus !== 'trained'
+        ? null
+        : result.needsReview === false
+          ? null
+          : (result.reviewReason ?? 'photo_check_unavailable');
+    const needsReview = reviewReason !== null;
     const suggestedListingGrade =
+      needsReview ||
       result.cropSupported !== true ||
       result.crop !== crop ||
       !GRADABLE_CROPS.includes(result.crop) ||
@@ -136,18 +161,25 @@ export class AiService {
       qualityGrade: suggestedListingGrade ?? undefined,
       modelGrade: result.qualityGrade,
       confidenceScore: result.confidenceScore,
+      reviewReason: reviewReason ?? undefined,
+      photoSimilarity: result.photoSimilarity ?? undefined,
       modelVersion: result.modelVersion,
     });
 
+    // The raw output stays in ai_predictions for evaluation; a referred grade
+    // never reaches the farmer, who retakes the photo or grades manually.
     return {
       predictionId: stored._id.toHexString(),
-      modelGrade: result.qualityGrade,
+      modelGrade: needsReview ? null : result.qualityGrade,
       suggestedListingGrade,
       confidenceScore: result.confidenceScore,
-      probabilities: result.probabilities,
+      probabilities: needsReview ? {} : result.probabilities,
       crop: result.crop,
       cropSupported: result.cropSupported,
-      lowConfidence: result.lowConfidence,
+      // Older clients only know lowConfidence; keep their warning visible.
+      lowConfidence: needsReview || result.lowConfidence,
+      needsReview,
+      reviewReason,
       modelStatus: result.modelStatus,
       modelVersion: result.modelVersion,
     };
@@ -157,6 +189,12 @@ export class AiService {
     farmerId: string,
     input: PriceSuggestionRequestDto,
   ): Promise<PriceSuggestionResponseDto> {
+    // The farmer's city selects their own mandi when it reported that day.
+    const profile = await this.farmerProfileModel
+      .findOne({ userId: new Types.ObjectId(farmerId) })
+      .select('farmLocation.city')
+      .lean()
+      .exec();
     const result = await this.call<ServicePrice>('/predict/price', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -166,6 +204,7 @@ export class AiService {
         unit: input.unit,
         quantity: input.quantity,
         qualityGrade: input.qualityGrade,
+        location: profile?.farmLocation?.city,
       }),
     });
 
@@ -180,7 +219,6 @@ export class AiService {
       },
       predictedMinPrice: result.predictedMinPrice,
       predictedMaxPrice: result.predictedMaxPrice,
-      confidenceScore: result.confidenceScore,
       modelVersion: result.modelVersion,
     });
 
@@ -189,9 +227,13 @@ export class AiService {
       predictedMinPrice: result.predictedMinPrice,
       predictedMaxPrice: result.predictedMaxPrice,
       unit: input.unit,
-      confidenceScore: result.confidenceScore,
       method: result.method,
-      basis: result.basis,
+      commodity: result.commodity,
+      observedOn: result.observedOn,
+      marketScope: result.marketScope,
+      marketCount: result.marketCount,
+      source: result.source,
+      sourceUrl: result.sourceUrl,
       modelVersion: result.modelVersion,
     };
   }

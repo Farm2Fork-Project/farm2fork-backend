@@ -89,6 +89,17 @@ export class AiPrediction {
   @Prop({ min: 0, max: 1 })
   confidenceScore?: number;
 
+  /** Why the grade was withheld from the farmer; absent when it was shown. */
+  @Prop({
+    type: String,
+    enum: ['low_confidence', 'unfamiliar_photo', 'photo_check_unavailable'],
+  })
+  reviewReason?: string;
+
+  /** Similarity of the photo to the training photos, for evaluation. */
+  @Prop()
+  photoSimilarity?: number;
+
   /** e.g. 'price-v1.2' - tracked for model evaluation. */
   @Prop()
   modelVersion?: string;
