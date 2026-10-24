@@ -29,12 +29,23 @@ export class QualityCheckRequestDto {
   crop!: GradableCrop;
 }
 
+export const QUALITY_REVIEW_REASONS = [
+  'low_confidence',
+  'unfamiliar_photo',
+  'photo_check_unavailable',
+] as const;
+export type QualityReviewReason = (typeof QUALITY_REVIEW_REASONS)[number];
+
 export class QualityCheckResponseDto {
   @ApiProperty({ description: 'Stored ai_predictions id' })
   predictionId!: string;
 
-  @ApiProperty({ enum: ['A', 'B', 'C', 'D'], description: 'Raw model grade' })
-  modelGrade!: 'A' | 'B' | 'C' | 'D';
+  @ApiProperty({
+    enum: ['A', 'B', 'C', 'D'],
+    nullable: true,
+    description: 'Raw model grade; null when the photo needs review.',
+  })
+  modelGrade!: 'A' | 'B' | 'C' | 'D' | null;
 
   @ApiPropertyOptional({
     enum: QualityGrade,
@@ -60,6 +71,15 @@ export class QualityCheckResponseDto {
 
   @ApiProperty()
   lowConfidence!: boolean;
+
+  @ApiProperty({
+    description:
+      'True when no grade can be shown: ask the farmer to retake the photo or choose the grade manually.',
+  })
+  needsReview!: boolean;
+
+  @ApiPropertyOptional({ enum: QUALITY_REVIEW_REASONS, nullable: true })
+  reviewReason!: QualityReviewReason | null;
 
   @ApiProperty({
     enum: ['trained', 'untrained'],
@@ -114,20 +134,36 @@ export class PriceSuggestionResponseDto {
   @ApiProperty({ enum: ProductUnit })
   unit!: ProductUnit;
 
-  @ApiProperty({ example: 0.45 })
-  confidenceScore!: number;
+  @ApiProperty({
+    enum: ['official_wholesale'],
+    description:
+      'Observed AMIS Punjab wholesale mandi prices for a dated trading day, not a prediction.',
+  })
+  method!: 'official_wholesale';
+
+  @ApiProperty({ example: 'Wheat', description: 'Official commodity name(s)' })
+  commodity!: string;
+
+  @ApiProperty({ example: '2026-10-22', description: 'Mandi trading day' })
+  observedOn!: string;
 
   @ApiProperty({
-    enum: ['rule_based'],
+    example: 'Faisalabad',
     description:
-      'rule_based = reference ranges x season x grade (master context 10.3), not a market-data model.',
+      "The farmer's own market, or Punjab for the middle half of markets",
   })
-  method!: 'rule_based';
+  marketScope!: string;
 
-  @ApiProperty({ enum: ['crop', 'category'] })
-  basis!: 'crop' | 'category';
+  @ApiProperty({ example: 13 })
+  marketCount!: number;
 
-  @ApiProperty({ example: 'price-rules-v1' })
+  @ApiProperty({ example: 'AMIS Punjab' })
+  source!: string;
+
+  @ApiProperty({ example: 'http://www.amis.pk' })
+  sourceUrl!: string;
+
+  @ApiProperty({ example: 'amis-punjab-2026-10-22' })
   modelVersion!: string;
 }
 
@@ -143,6 +179,6 @@ export class AiStatusResponseDto {
   @ApiPropertyOptional({ type: [String] })
   trainedCrops?: string[];
 
-  @ApiPropertyOptional({ example: 'rule_based' })
+  @ApiPropertyOptional({ example: 'official_wholesale' })
   priceMethod?: string;
 }
