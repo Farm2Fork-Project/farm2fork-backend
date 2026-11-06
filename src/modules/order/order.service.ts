@@ -362,8 +362,32 @@ export class OrderService {
           .exec()
       : [];
     const blocked = new Set(sessions.map((id) => String(id)));
+    const paidOrders = orders.filter(
+      (order) =>
+        order.paymentId &&
+        [
+          OrderStatus.Paid,
+          OrderStatus.Processing,
+          OrderStatus.Shipped,
+          OrderStatus.Delivered,
+        ].includes(order.status),
+    );
+    const settledIds = paidOrders.length
+      ? await this.paymentModel
+          .distinct('orderId', {
+            $or: paidOrders.map((order) => ({
+              _id: order.paymentId,
+              orderId: order._id,
+            })),
+            status: 'success',
+            paidAt: { $type: 'date' },
+          })
+          .exec()
+      : [];
+    const settled = new Set(settledIds.map(String));
     return orders.map((order) => ({
       ...this.toResponse(order),
+      canViewQr: settled.has(String(order._id)),
       canCancel:
         order.status === OrderStatus.Pending &&
         !order.paymentStartedAt &&
@@ -374,6 +398,7 @@ export class OrderService {
 
   private toResponse(order: OrderDocument): OrderResponseDto {
     return {
+      canViewQr: false,
       id: order.id as string,
       buyerId: order.buyerId.toHexString(),
       farmerId: order.farmerId.toHexString(),
@@ -382,6 +407,7 @@ export class OrderService {
         farmerId: i.farmerId.toHexString(),
         productName: i.productName,
         quantity: i.quantity,
+        unit: i.unit,
         unitPrice: i.unitPrice,
         subtotal: i.subtotal,
       })),

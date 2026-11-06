@@ -47,6 +47,10 @@ export class OrderQuoteResponseDto {
 
 export class OrderResponseDto {
   @ApiProperty({
+    description: 'Server-verified settled payment permits an order QR',
+  })
+  canViewQr!: boolean;
+  @ApiProperty({
     description:
       'Only an unpaid draft without a payment session can be cancelled',
   })

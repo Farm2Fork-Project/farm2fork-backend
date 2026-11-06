@@ -1,0 +1,48 @@
+{
+  "health": {
+    "status": "ok",
+    "qualityModel": "trained",
+    "qualityModelVersion": "grade-only-efficientnet_b0-17f80bde",
+    "photoCheck": "enabled",
+    "trainedCrops": [
+      "wheat",
+      "rice",
+      "mango",
+      "maize"
+    ],
+    "priceModelVersion": "amis-punjab-2026-10-22",
+    "priceMethod": "official_wholesale"
+  },
+  "price": {
+    "predictedMinPrice": 111.88,
+    "predictedMaxPrice": 123.8,
+    "unit": "kg",
+    "currency": "PKR",
+    "modelVersion": "amis-punjab-2026-10-22",
+    "method": "official_wholesale",
+    "commodity": "Wheat",
+    "observedOn": "2026-10-22",
+    "marketScope": "Punjab",
+    "marketCount": 12,
+    "source": "AMIS Punjab (Agriculture Marketing Information Service, Government of the Punjab)",
+    "sourceUrl": "http://www.amis.pk"
+  },
+  "quality": {
+    "qualityGrade": "A",
+    "confidenceScore": 0.6779,
+    "probabilities": {
+      "A": 0.6779,
+      "B": 0.1325,
+      "C": 0.051,
+      "D": 0.1386
+    },
+    "crop": "wheat",
+    "cropSupported": true,
+    "lowConfidence": true,
+    "needsReview": true,
+    "reviewReason": "unfamiliar_photo",
+    "photoSimilarity": 0.2035,
+    "modelStatus": "trained",
+    "modelVersion": "grade-only-efficientnet_b0-17f80bde"
+  }
+}

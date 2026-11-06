@@ -1,3 +1,10 @@
+import { OrderProvenanceService } from '../src/modules/order/order-provenance.service';
+import { OrderService } from '../src/modules/order/order.service';
+import {
+  Payment,
+  PaymentSchema,
+} from '../src/modules/payment/schemas/payment.schema';
+import { User, UserSchema } from '../src/modules/auth/schemas/user.schema';
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -74,6 +81,8 @@ describe('Product provenance: listing -> payment -> shipment -> public trace', (
         MongooseModule.forFeature([
           { name: Product.name, schema: ProductSchema },
           { name: Order.name, schema: OrderSchema },
+          { name: Payment.name, schema: PaymentSchema },
+          { name: User.name, schema: UserSchema },
           { name: FarmerProfile.name, schema: FarmerProfileSchema },
           { name: TransporterProfile.name, schema: TransporterProfileSchema },
           { name: Shipment.name, schema: ShipmentSchema },
@@ -88,6 +97,8 @@ describe('Product provenance: listing -> payment -> shipment -> public trace', (
         StorageService,
         TransportService,
         TraceabilityService,
+        OrderProvenanceService,
+        OrderService,
         {
           provide: SystemConfigService,
           useValue: {
@@ -132,9 +143,15 @@ describe('Product provenance: listing -> payment -> shipment -> public trace', (
   });
 
   afterAll(async () => {
-    await connection.close();
-    await moduleRef.close();
-    await replSet.stop();
+    try {
+      await connection?.close();
+    } finally {
+      try {
+        await moduleRef?.close();
+      } finally {
+        await replSet?.stop();
+      }
+    }
   });
 
   it('builds a public, ledger-annotated journey from real writes', async () => {
@@ -247,9 +264,9 @@ describe('Product provenance: listing -> payment -> shipment -> public trace', (
     // 4. A transporter claims the delivery (real transactional path).
     const transporterId = new Types.ObjectId();
     await moduleRef
-      .get<Model<TransporterProfileDocument>>(
-        getModelToken(TransporterProfile.name),
-      )
+      .get<
+        Model<TransporterProfileDocument>
+      >(getModelToken(TransporterProfile.name))
       .create({
         userId: transporterId,
         vehicleType: VehicleType.Van,

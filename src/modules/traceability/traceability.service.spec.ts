@@ -16,6 +16,7 @@ import {
   ProductUnit,
   QualityGrade,
 } from '../marketplace/schemas/product.schema';
+import { OrderProvenanceService } from '../order/order-provenance.service';
 import { Order } from '../order/schemas/order.schema';
 import {
   LedgerCheckState,
@@ -116,6 +117,7 @@ describe('TraceabilityService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         TraceabilityService,
+        { provide: OrderProvenanceService, useValue: {} },
         { provide: FABRIC_GATEWAY_CLIENT, useValue: fabric },
         { provide: getModelToken(Product.name), useValue: productModel },
         { provide: getModelToken(Order.name), useValue: orderModel },
