@@ -567,6 +567,76 @@ describe('TransportService', () => {
     });
   });
 
+  describe('transporter location on shipment reads', () => {
+    const buyer = { id: buyerId, role: UserRole.Buyer, email: 'b@example.com' };
+    const farmer = {
+      id: farmerId,
+      role: UserRole.Farmer,
+      email: 'f@example.com',
+    };
+    const reported = (minutesAgo: number) => ({
+      userId: new Types.ObjectId(transporterId),
+      lastLocation: { type: 'Point', coordinates: [74.3587, 31.5204] },
+      lastLocationAt: new Date(Date.now() - minutesAgo * 60_000),
+    });
+    const read = (
+      user: typeof buyer,
+      status: ShipmentStatus,
+      minutesAgo = 3,
+    ) => {
+      orderModel.find.mockReturnValue(query([makeOrder()]));
+      shipmentModel.find.mockReturnValue(chain([makeShipment({ status })]));
+      transporterProfileModel.find.mockReturnValue(
+        chain([reported(minutesAgo)]),
+      );
+      return service.findAll(user);
+    };
+
+    it('shows the buyer where their goods are once picked up', async () => {
+      const [shipment] = await read(buyer, ShipmentStatus.InTransit);
+      expect(shipment.transporterLocation).toEqual({
+        lat: 31.5204,
+        lng: 74.3587,
+        at: expect.any(String),
+      });
+    });
+
+    it('hides the position from the buyer before pickup and after delivery', async () => {
+      for (const status of [
+        ShipmentStatus.Assigned,
+        ShipmentStatus.Delivered,
+      ]) {
+        const [shipment] = await read(buyer, status);
+        expect(shipment.transporterLocation).toBeUndefined();
+      }
+    });
+
+    it('shows the farmer the transporter heading to pickup only', async () => {
+      const [assigned] = await read(farmer, ShipmentStatus.Assigned);
+      const [inTransit] = await read(farmer, ShipmentStatus.InTransit);
+      expect(assigned.transporterLocation).toBeDefined();
+      expect(inTransit.transporterLocation).toBeUndefined();
+    });
+
+    it('omits a position older than two hours', async () => {
+      const [shipment] = await read(buyer, ShipmentStatus.InTransit, 121);
+      expect(shipment.transporterLocation).toBeUndefined();
+    });
+
+    it('never adds it for the transporter', async () => {
+      shipmentModel.find.mockReturnValue(
+        chain([makeShipment({ status: ShipmentStatus.InTransit })]),
+      );
+      const [shipment] = await service.findAll({
+        id: transporterId,
+        role: UserRole.Transporter,
+        email: 't@example.com',
+      });
+      expect(shipment.transporterLocation).toBeUndefined();
+      expect(transporterProfileModel.find).not.toHaveBeenCalled();
+    });
+  });
+
   it('rejects a delivery status update from a transporter that does not own the shipment', async () => {
     shipmentModel.findById.mockReturnValue(transactionQuery(makeShipment()));
 

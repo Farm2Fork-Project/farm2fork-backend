@@ -8,6 +8,7 @@ import {
   FarmerProfile,
   FarmerProfileSchema,
 } from '../auth/schemas/farmer-profile.schema';
+import { OrderProvenanceService } from './order-provenance.service';
 import { OrderController } from './order.controller';
 import { OrderService } from './order.service';
 import { Order, OrderSchema } from './schemas/order.schema';
@@ -30,7 +31,7 @@ import { Order, OrderSchema } from './schemas/order.schema';
     AdminModule,
   ],
   controllers: [OrderController],
-  providers: [OrderService],
-  exports: [MongooseModule, OrderService],
+  providers: [OrderService, OrderProvenanceService],
+  exports: [MongooseModule, OrderService, OrderProvenanceService],
 })
 export class OrderModule {}

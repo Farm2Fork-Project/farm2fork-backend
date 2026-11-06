@@ -1,3 +1,5 @@
+import { OrderProvenanceService } from '../order/order-provenance.service';
+import { OrderTraceResponseDto } from './dto/order-trace-response.dto';
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -76,6 +78,7 @@ export class TraceabilityService {
     private readonly blockchainModel: Model<BlockchainTransactionDocument>,
     @InjectModel(FarmerProfile.name)
     private readonly farmerProfileModel: Model<FarmerProfileDocument>,
+    private readonly provenance: OrderProvenanceService,
   ) {}
 
   async traceProduct(productId: string): Promise<ProductTraceResponseDto> {
@@ -145,6 +148,92 @@ export class TraceabilityService {
           listed?.ledger.status === TraceLedgerStatus.Confirmed &&
           (listed.ledger.onChain === undefined ||
             listed.ledger.onChain === OnChainCheck.Verified),
+        ledgerCheck,
+      },
+    };
+  }
+
+  async traceOrder(id: string): Promise<OrderTraceResponseDto> {
+    const { order, paidAt } = await this.provenance.getSettledOrder(id);
+    const productIds = order.items.map((item) => item.productId);
+    const [farmer, listed, shipment, payment] = await Promise.all([
+      this.farmerSummary(order.farmerId),
+      this.blockchainModel
+        .find({
+          type: BlockchainTxType.SupplyChainEvent,
+          'payload.supplyChain.eventType': TraceEventType.Listed,
+          'payload.supplyChain.productId': { $in: productIds },
+        })
+        .sort({ createdAt: 1 })
+        .limit(MAX_SUPPLY_CHAIN_EVENTS)
+        .exec(),
+      order.shipmentId
+        ? this.blockchainModel
+            .find({
+              type: BlockchainTxType.SupplyChainEvent,
+              referenceId: order.shipmentId,
+              'payload.supplyChain.productId': { $in: productIds },
+            })
+            .sort({ createdAt: 1 })
+            .limit(MAX_SUPPLY_CHAIN_EVENTS)
+            .exec()
+        : [],
+      this.blockchainModel
+        .find({ type: BlockchainTxType.Payment, referenceId: order.paymentId })
+        .sort({ createdAt: 1 })
+        .limit(MAX_PAYMENT_EVENTS)
+        .exec(),
+    ]);
+    const supply = [...listed, ...shipment].filter((record) =>
+      SUPPLY_CHAIN_EVENT_TYPES.has(
+        record.payload?.supplyChain?.eventType ?? '',
+      ),
+    );
+    const records = [...supply, ...payment];
+    const events = [
+      ...supply.map((record) => this.toSupplyChainEvent(record)),
+      ...payment.map((record) => this.toPaymentEvent(record)),
+    ].sort(
+      (a, b) =>
+        a.occurredAt.localeCompare(b.occurredAt) || a.id.localeCompare(b.id),
+    );
+    const ledgerCheck = await this.checkOnChain(records, events);
+    const origins = events.filter(
+      (event) => event.type === TraceEventType.Listed,
+    );
+    return {
+      order: {
+        id: order._id.toHexString(),
+        reference: shortReference(order._id),
+        status: order.status,
+        paidAt: paidAt.toISOString(),
+        items: order.items.map((item) => ({
+          productId: item.productId.toHexString(),
+          productName: item.productName,
+          quantity: item.quantity,
+          unit: item.unit,
+        })),
+      },
+      farmer,
+      events,
+      summary: {
+        totalEvents: events.length,
+        confirmedEvents: events.filter(
+          (event) => event.ledger.status === TraceLedgerStatus.Confirmed,
+        ).length,
+        originVerified:
+          new Set(
+            listed.map((record) =>
+              String(record.payload.supplyChain?.productId),
+            ),
+          ).size === new Set(productIds.map(String)).size &&
+          origins.length > 0 &&
+          origins.every(
+            (event) =>
+              event.ledger.status === TraceLedgerStatus.Confirmed &&
+              (event.ledger.onChain === undefined ||
+                event.ledger.onChain === OnChainCheck.Verified),
+          ),
         ledgerCheck,
       },
     };

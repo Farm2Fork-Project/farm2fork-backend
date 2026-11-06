@@ -18,6 +18,13 @@ import {
 export const GRADABLE_CROPS = ['wheat', 'rice', 'mango', 'maize'] as const;
 export type GradableCrop = (typeof GRADABLE_CROPS)[number];
 
+export type ReviewReason =
+  | 'low_confidence'
+  | 'unfamiliar_photo'
+  | 'photo_check_unavailable'
+  | 'unsupported_crop'
+  | 'untrained_model';
+
 export type ModelStatus = 'trained' | 'untrained';
 
 export class QualityCheckRequestDto {
@@ -43,6 +50,24 @@ export class QualityCheckResponseDto {
       'Optional grade suggestion for the selected supported crop; null for unsupported output or D (below listable grades).',
   })
   suggestedListingGrade!: QualityGrade | null;
+
+  @ApiProperty()
+  needsReview!: boolean;
+
+  @ApiProperty({
+    nullable: true,
+    enum: [
+      'low_confidence',
+      'unfamiliar_photo',
+      'photo_check_unavailable',
+      'unsupported_crop',
+      'untrained_model',
+    ],
+  })
+  reviewReason!: ReviewReason | null;
+
+  @ApiProperty({ nullable: true, type: Number })
+  photoSimilarity!: number | null;
 
   @ApiProperty({ example: 0.82 })
   confidenceScore!: number;
@@ -114,21 +139,32 @@ export class PriceSuggestionResponseDto {
   @ApiProperty({ enum: ProductUnit })
   unit!: ProductUnit;
 
-  @ApiProperty({ example: 0.45 })
-  confidenceScore!: number;
+  @ApiProperty({ enum: ['official_wholesale'] })
+  method!: 'official_wholesale';
 
-  @ApiProperty({
-    enum: ['rule_based'],
-    description:
-      'rule_based = reference ranges x season x grade (master context 10.3), not a market-data model.',
-  })
-  method!: 'rule_based';
+  @ApiProperty({ enum: ['PKR'] })
+  currency!: 'PKR';
 
-  @ApiProperty({ enum: ['crop', 'category'] })
-  basis!: 'crop' | 'category';
-
-  @ApiProperty({ example: 'price-rules-v1' })
+  @ApiProperty()
   modelVersion!: string;
+
+  @ApiProperty()
+  commodity!: string;
+
+  @ApiProperty({ example: '2026-10-28' })
+  observedOn!: string;
+
+  @ApiProperty()
+  marketScope!: string;
+
+  @ApiProperty()
+  marketCount!: number;
+
+  @ApiProperty()
+  source!: string;
+
+  @ApiProperty()
+  sourceUrl!: string;
 }
 
 export class AiStatusResponseDto {

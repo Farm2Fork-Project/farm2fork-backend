@@ -93,6 +93,31 @@ export class AiPrediction {
   @Prop()
   modelVersion?: string;
 
+  @Prop()
+  needsReview?: boolean;
+  @Prop({ type: String, default: null })
+  reviewReason?: string | null;
+  @Prop({ type: Number, default: null })
+  photoSimilarity?: number | null;
+  @Prop()
+  method?: string;
+  @Prop()
+  currency?: string;
+  @Prop()
+  unit?: string;
+  @Prop()
+  commodity?: string;
+  @Prop()
+  observedOn?: string;
+  @Prop()
+  marketScope?: string;
+  @Prop()
+  marketCount?: number;
+  @Prop()
+  source?: string;
+  @Prop()
+  sourceUrl?: string;
+
   createdAt!: Date;
 }
 

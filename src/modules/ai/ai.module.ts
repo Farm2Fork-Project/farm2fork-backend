@@ -1,5 +1,9 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import {
+  FarmerProfile,
+  FarmerProfileSchema,
+} from '../auth/schemas/farmer-profile.schema';
 import { AiController } from './ai.controller';
 import { AiService } from './ai.service';
 import {
@@ -16,6 +20,7 @@ import {
   imports: [
     MongooseModule.forFeature([
       { name: AiPrediction.name, schema: AiPredictionSchema },
+      { name: FarmerProfile.name, schema: FarmerProfileSchema },
     ]),
   ],
   controllers: [AiController],

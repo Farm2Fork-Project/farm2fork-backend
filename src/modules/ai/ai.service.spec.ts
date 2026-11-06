@@ -10,6 +10,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import { Types } from 'mongoose';
 import { ProductUnit } from '../marketplace/schemas/product.schema';
+import { FarmerProfile } from '../auth/schemas/farmer-profile.schema';
 import { AiService } from './ai.service';
 import {
   GRADABLE_CROPS,
@@ -56,6 +57,19 @@ describe('AiService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         AiService,
+        {
+          provide: getModelToken(FarmerProfile.name),
+          useValue: {
+            findOne: jest.fn(() => ({
+              select: () => ({
+                lean: () => ({
+                  exec: () =>
+                    Promise.resolve({ farmLocation: { city: 'Lahore' } }),
+                }),
+              }),
+            })),
+          },
+        },
         {
           provide: getModelToken(AiPrediction.name),
           useValue: predictionModel,
@@ -111,6 +125,9 @@ describe('AiService', () => {
           probabilities: { A: 0.9, B: 0.05, C: 0.03, D: 0.02 },
           ...output,
           lowConfidence: false,
+          needsReview: false,
+          reviewReason: null,
+          photoSimilarity: 0.9,
           modelStatus: 'trained',
           modelVersion: 'test-model',
         }),
@@ -134,6 +151,9 @@ describe('AiService', () => {
           crop,
           cropSupported: true,
           lowConfidence: false,
+          needsReview: false,
+          reviewReason: null,
+          photoSimilarity: 0.9,
           modelStatus: 'trained',
           modelVersion: 'grade-cond-efficientnet_b0-1a2b3c4d',
         }),
@@ -175,6 +195,9 @@ describe('AiService', () => {
         crop: 'rice',
         cropSupported: true,
         lowConfidence: false,
+        needsReview: false,
+        reviewReason: null,
+        photoSimilarity: 0.9,
         modelStatus: 'untrained',
         modelVersion: 'grade-cond-efficientnet_b0-untrained',
       }),
@@ -205,36 +228,174 @@ describe('AiService', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('suggests a rule-based price and stores it', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse(200, {
-        predictedMinPrice: 198,
-        predictedMaxPrice: 418,
-        confidenceScore: 0.45,
-        modelVersion: 'price-rules-v1',
-        method: 'rule_based',
-        basis: 'crop',
-      }),
-    );
-
+  const officialPrice = {
+    predictedMinPrice: 198,
+    predictedMaxPrice: 418,
+    unit: 'kg',
+    currency: 'PKR',
+    modelVersion: 'amis-test',
+    method: 'official_wholesale',
+    commodity: 'Rice',
+    observedOn: '2026-10-28',
+    marketScope: 'Lahore',
+    marketCount: 1,
+    source: 'AMIS Punjab',
+    sourceUrl: 'https://amis.pk/prices',
+  };
+  it('forwards profile city and preserves official wholesale provenance without invented confidence', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, officialPrice));
     const result = await service.suggestPrice(FARMER, {
-      productName: 'Basmati Rice',
+      productName: 'Rice',
       category: 'grains',
       unit: ProductUnit.Kg,
     });
-
-    expect(result).toMatchObject({
-      predictedMinPrice: 198,
-      predictedMaxPrice: 418,
-      method: 'rule_based',
-      unit: 'kg',
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+      location: 'Lahore',
     });
+    expect(result).toMatchObject(officialPrice);
+    expect(result).not.toHaveProperty('confidenceScore');
     expect(predictionModel.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        predictionType: PredictionType.Price,
-        predictedMinPrice: 198,
-        modelVersion: 'price-rules-v1',
+      expect.objectContaining(officialPrice),
+    );
+  });
+  it.each([
+    { needsReview: undefined },
+    { reviewReason: undefined },
+    { needsReview: true, reviewReason: 'unfamiliar_photo' },
+    { lowConfidence: true },
+    {
+      confidenceScore: 0.65,
+      probabilities: { A: 0.65, B: 0.2, C: 0.1, D: 0.05 },
+    },
+    { photoSimilarity: null },
+    { modelStatus: 'untrained' },
+  ])('fails closed for unsafe quality %j', async (override) => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        qualityGrade: 'A',
+        confidenceScore: 0.9,
+        probabilities: { A: 0.9, B: 0.05, C: 0.03, D: 0.02 },
+        crop: 'mango',
+        cropSupported: true,
+        lowConfidence: false,
+        modelStatus: 'trained',
+        modelVersion: 'test',
+        needsReview: false,
+        reviewReason: null,
+        photoSimilarity: 0.9,
+        ...override,
       }),
+    );
+    const result = await service.checkQuality(FARMER, 'mango', image());
+    expect(result.suggestedListingGrade).toBeNull();
+    expect(result).toMatchObject({ needsReview: true });
+  });
+  it.each([
+    { predictedMinPrice: -1 },
+    { predictedMaxPrice: 1 },
+    { method: 'rule_based' },
+    { observedOn: 'bad' },
+    { marketCount: 0 },
+    { unit: 'ton' },
+    { sourceUrl: 'javascript:alert(1)' },
+    { sourceUrl: 'https://user:password@amis.pk' },
+  ])(
+    'rejects malformed upstream price %j without storing',
+    async (override) => {
+      fetchMock.mockResolvedValue(
+        jsonResponse(200, { ...officialPrice, ...override }),
+      );
+      await expect(
+        service.suggestPrice(FARMER, {
+          productName: 'Rice',
+          category: 'grains',
+          unit: ProductUnit.Kg,
+        }),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+      expect(predictionModel.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([null, {}, { qualityGrade: 'Z' }])(
+    'rejects malformed upstream quality %j without persistence',
+    async (output) => {
+      fetchMock.mockResolvedValue(jsonResponse(200, output));
+      await expect(
+        service.checkQuality(FARMER, 'mango', image()),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+      expect(predictionModel.create).not.toHaveBeenCalled();
+    },
+  );
+  it.each([
+    { probabilities: { A: 0.05, B: 0.95, C: 0, D: 0 } },
+    { probabilities: { A: 0.95, B: 0.95, C: 0, D: 0 } },
+    { confidenceScore: 0.8 },
+  ])(
+    'rejects inconsistent quality probabilities %j before persistence',
+    async (override) => {
+      fetchMock.mockResolvedValue(
+        jsonResponse(200, {
+          qualityGrade: 'A',
+          confidenceScore: 0.95,
+          probabilities: { A: 0.95, B: 0.03, C: 0.01, D: 0.01 },
+          crop: 'wheat',
+          cropSupported: true,
+          lowConfidence: false,
+          modelStatus: 'trained',
+          modelVersion: 'test',
+          needsReview: false,
+          reviewReason: null,
+          photoSimilarity: 0.9,
+          ...override,
+        }),
+      );
+      await expect(
+        service.checkQuality(FARMER, 'wheat', image()),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+      expect(predictionModel.create).not.toHaveBeenCalled();
+    },
+  );
+  it('accepts rounded probability sums and a selected maximum tied grade', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        qualityGrade: 'A',
+        confidenceScore: 0.3333,
+        probabilities: { A: 0.3333, B: 0.3333, C: 0.3333, D: 0 },
+        crop: 'wheat',
+        cropSupported: true,
+        lowConfidence: true,
+        modelStatus: 'trained',
+        modelVersion: 'test',
+        needsReview: true,
+        reviewReason: 'low_confidence',
+        photoSimilarity: 0.9,
+      }),
+    );
+    await expect(
+      service.checkQuality(FARMER, 'wheat', image()),
+    ).resolves.toMatchObject({
+      needsReview: true,
+      suggestedListingGrade: null,
+    });
+    expect(predictionModel.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not expose uncontracted upstream price metadata', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        ...officialPrice,
+        confidenceScore: 0.99,
+        basis: 'crop',
+      }),
+    );
+    const result = await service.suggestPrice(FARMER, {
+      productName: 'Rice',
+      category: 'grains',
+      unit: ProductUnit.Kg,
+    });
+    expect(result).not.toHaveProperty('confidenceScore');
+    expect(predictionModel.create.mock.calls[0][0]).not.toHaveProperty(
+      'confidenceScore',
     );
   });
 

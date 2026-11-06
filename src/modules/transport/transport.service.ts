@@ -102,6 +102,19 @@ const STATUS_UPDATE_COPY: Partial<
  * with a fixed-price offer. Any of them can decline, or accept - the first
  * accept wins atomically and becomes the shipment.
  */
+/** Shipment states in which each role may see the transporter's position. */
+const TRACKING_VISIBILITY: Partial<Record<UserRole, ShipmentStatus[]>> = {
+  [UserRole.Farmer]: [ShipmentStatus.Assigned],
+  [UserRole.Buyer]: [ShipmentStatus.PickedUp, ShipmentStatus.InTransit],
+  [UserRole.Admin]: [
+    ShipmentStatus.Assigned,
+    ShipmentStatus.PickedUp,
+    ShipmentStatus.InTransit,
+  ],
+};
+/** Older positions are hidden rather than shown as current. */
+const TRACKING_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+
 @Injectable()
 export class TransportService {
   private readonly logger = new Logger(TransportService.name);
@@ -501,8 +514,11 @@ export class TransportService {
       .find(filter)
       .sort({ createdAt: -1 })
       .exec();
-    return this.withContacts(
-      shipments.map((shipment) => this.toResponse(shipment)),
+    return this.withTransporterLocation(
+      await this.withContacts(
+        shipments.map((shipment) => this.toResponse(shipment)),
+        user,
+      ),
       user,
     );
   }
@@ -514,7 +530,59 @@ export class TransportService {
     const shipment = await this.shipmentModel.findById(id).exec();
     if (!shipment) throw new NotFoundException('Shipment not found');
     await this.assertReadAccess(shipment, user);
-    return (await this.withContacts([this.toResponse(shipment)], user))[0];
+    const [response] = await this.withContacts(
+      [this.toResponse(shipment)],
+      user,
+    );
+    return (await this.withTransporterLocation([response], user))[0];
+  }
+
+  /**
+   * Adds the transporter's last reported position where the caller is
+   * waiting on them: the farmer until pickup, the buyer once their goods are
+   * on the way, admins while the delivery is active. Never before assignment,
+   * after completion, or to anyone outside the shipment's scope.
+   */
+  private async withTransporterLocation(
+    shipments: ShipmentResponseDto[],
+    user: RequestUser,
+  ): Promise<ShipmentResponseDto[]> {
+    const visible = TRACKING_VISIBILITY[user.role] ?? [];
+    const tracked = shipments.filter(
+      (item) => item.transporterId && visible.includes(item.status),
+    );
+    if (tracked.length === 0) return shipments;
+    const profiles = await this.transporterProfileModel
+      .find({
+        userId: {
+          $in: tracked.map((item) => new Types.ObjectId(item.transporterId)),
+        },
+      })
+      .select('userId lastLocation lastLocationAt')
+      .lean()
+      .exec();
+    const cutoff = Date.now() - TRACKING_MAX_AGE_MS;
+    const locations = new Map(
+      profiles
+        .filter(
+          (profile) =>
+            profile.lastLocation &&
+            profile.lastLocationAt &&
+            profile.lastLocationAt.getTime() >= cutoff,
+        )
+        .map((profile) => [
+          String(profile.userId),
+          {
+            ...fromGeoPoint(profile.lastLocation!),
+            at: profile.lastLocationAt!.toISOString(),
+          },
+        ]),
+    );
+    return shipments.map((item) => {
+      const location =
+        tracked.includes(item) && locations.get(item.transporterId);
+      return location ? { ...item, transporterLocation: location } : item;
+    });
   }
 
   private async withContacts(

@@ -43,6 +43,14 @@ export class ShipmentStatusHistoryResponseDto {
   updatedBy?: string;
 }
 
+export class TransporterLocationDto {
+  @ApiProperty() lat!: number;
+  @ApiProperty() lng!: number;
+
+  @ApiProperty({ description: 'When the transporter app reported it' })
+  at!: string;
+}
+
 /** Full address view returned only after the caller has passed shipment scope checks. */
 export class ShipmentResponseDto {
   @ApiProperty()
@@ -71,6 +79,13 @@ export class ShipmentResponseDto {
   }[];
   pickupContact?: { name?: string; phone?: string };
   deliveryContact?: { name?: string; phone?: string };
+
+  @ApiPropertyOptional({
+    type: TransporterLocationDto,
+    description:
+      "The assigned transporter's last foreground location: for the farmer before pickup, the buyer after pickup and admins while active. Omitted when older than two hours.",
+  })
+  transporterLocation?: TransporterLocationDto;
 
   @ApiProperty({ enum: ShipmentStatus })
   status!: ShipmentStatus;
