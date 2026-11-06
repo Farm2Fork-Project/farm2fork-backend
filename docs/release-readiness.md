@@ -45,3 +45,7 @@ The full e2e run exposed a stale test module: TraceabilityService now requires O
 ## Resumed final verification — 2026-11-06
 
 Final full unit suite: **36 suites / 292 tests passed**, including the probability invariants and Python contract fixture. Nest production build passed. Durable output: `backend-unit.log` beside this report. Earlier integration receipt remains **8 suites / 49 tests passed** after real traceability fixture wiring.
+
+## Develop integration — 2026-11-06
+
+Merged the release work onto develop based on freshly fetched origin/main. Final merged-tree validation passed: 292 unit tests, 50 integration tests, production build. Also merged the previously unintegrated shipment estimated-delivery persistence fix, including its new MongoDB integration regression. Production was not contacted or deployed. Signing/device/provider acceptance gates remain as recorded above.
