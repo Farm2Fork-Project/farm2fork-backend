@@ -284,6 +284,7 @@ export class AiService {
       (result.reviewReason != null &&
         ![
           'low_confidence',
+          'crop_mismatch',
           'unfamiliar_photo',
           'photo_check_unavailable',
           'unsupported_crop',

@@ -262,6 +262,7 @@ describe('AiService', () => {
     { needsReview: undefined },
     { reviewReason: undefined },
     { needsReview: true, reviewReason: 'unfamiliar_photo' },
+    { needsReview: true, reviewReason: 'crop_mismatch' },
     { lowConfidence: true },
     {
       confidenceScore: 0.65,

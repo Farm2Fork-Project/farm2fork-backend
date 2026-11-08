@@ -76,6 +76,9 @@ services:
       APP_ENV: production
       AI_REQUIRE_TRAINED: ${AI_REQUIRE_TRAINED:-true}
       MODEL_CHECKPOINT: /app/models/best_model.pth
+      # Crop-match check (CLIP ViT-B/32 weights, mounted with the model files).
+      # Must exist before this release: a missing file stops the AI service.
+      CROP_MATCH_WEIGHTS: ${CROP_MATCH_WEIGHTS:-/app/models/crop-match/open_clip_model.safetensors}
       OMP_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"
     volumes:

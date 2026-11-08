@@ -20,6 +20,7 @@ export type GradableCrop = (typeof GRADABLE_CROPS)[number];
 
 export type ReviewReason =
   | 'low_confidence'
+  | 'crop_mismatch'
   | 'unfamiliar_photo'
   | 'photo_check_unavailable'
   | 'unsupported_crop'
@@ -58,6 +59,7 @@ export class QualityCheckResponseDto {
     nullable: true,
     enum: [
       'low_confidence',
+      'crop_mismatch',
       'unfamiliar_photo',
       'photo_check_unavailable',
       'unsupported_crop',
