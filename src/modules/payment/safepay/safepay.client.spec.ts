@@ -56,7 +56,10 @@ describe('SafepayClient', () => {
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
     expect(body.amount).toBe(87000);
     expect(body.merchant_api_key).toBe('sec_public');
-    expect(init.headers).not.toHaveProperty('X-SFPY-MERCHANT-SECRET');
+    // The sandbox answers 401 without the merchant secret on tracker creation.
+    expect(
+      (init.headers as Record<string, string>)['X-SFPY-MERCHANT-SECRET'],
+    ).toBe('secret_key');
   });
 
   it('throws when Safepay does not return a tracker token', async () => {
