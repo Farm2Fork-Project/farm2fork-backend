@@ -10,6 +10,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import { Types } from 'mongoose';
 import { ProductUnit } from '../marketplace/schemas/product.schema';
+import { FarmerProfile } from '../auth/schemas/farmer-profile.schema';
 import { AiService } from './ai.service';
 import {
   GRADABLE_CROPS,
@@ -18,7 +19,6 @@ import {
 } from './dto/ai.dto';
 import { validate } from 'class-validator';
 import { AiPrediction, PredictionType } from './schemas/ai-prediction.schema';
-import { FarmerProfile } from '../auth/schemas/farmer-profile.schema';
 
 const FARMER = '6a2fe77bb77795516febc111';
 
@@ -40,7 +40,6 @@ const image = (overrides: Record<string, unknown> = {}) => ({
 describe('AiService', () => {
   let service: AiService;
   let predictionModel: { create: jest.Mock };
-  let farmerProfileModel: { city?: string; findOne: jest.Mock };
   let fetchMock: jest.SpyInstance;
   let config: Record<string, string | undefined>;
 
@@ -49,20 +48,6 @@ describe('AiService', () => {
       create: jest.fn((doc: Record<string, unknown>) =>
         Promise.resolve({ ...doc, _id: new Types.ObjectId() }),
       ),
-    };
-    farmerProfileModel = {
-      findOne: jest.fn(() => ({
-        select: () => ({
-          lean: () => ({
-            exec: () =>
-              Promise.resolve(
-                farmerProfileModel.city
-                  ? { farmLocation: { city: farmerProfileModel.city } }
-                  : null,
-              ),
-          }),
-        }),
-      })),
     };
     config = {
       AI_SERVICE_URL: 'http://ai.internal:8000/',
@@ -73,12 +58,21 @@ describe('AiService', () => {
       providers: [
         AiService,
         {
-          provide: getModelToken(AiPrediction.name),
-          useValue: predictionModel,
+          provide: getModelToken(FarmerProfile.name),
+          useValue: {
+            findOne: jest.fn(() => ({
+              select: () => ({
+                lean: () => ({
+                  exec: () =>
+                    Promise.resolve({ farmLocation: { city: 'Lahore' } }),
+                }),
+              }),
+            })),
+          },
         },
         {
-          provide: getModelToken(FarmerProfile.name),
-          useValue: farmerProfileModel,
+          provide: getModelToken(AiPrediction.name),
+          useValue: predictionModel,
         },
         { provide: ConfigService, useValue: { get: (k: string) => config[k] } },
       ],
@@ -131,6 +125,9 @@ describe('AiService', () => {
           probabilities: { A: 0.9, B: 0.05, C: 0.03, D: 0.02 },
           ...output,
           lowConfidence: false,
+          needsReview: false,
+          reviewReason: null,
+          photoSimilarity: 0.9,
           modelStatus: 'trained',
           modelVersion: 'test-model',
         }),
@@ -156,6 +153,7 @@ describe('AiService', () => {
           lowConfidence: false,
           needsReview: false,
           reviewReason: null,
+          photoSimilarity: 0.9,
           modelStatus: 'trained',
           modelVersion: 'grade-cond-efficientnet_b0-1a2b3c4d',
         }),
@@ -188,75 +186,6 @@ describe('AiService', () => {
     },
   );
 
-  it.each([
-    ['low_confidence', 'low_confidence'],
-    ['unfamiliar_photo', 'unfamiliar_photo'],
-  ] as const)(
-    'withholds a %s grade from the farmer but stores the raw output',
-    async (reviewReason, expected) => {
-      fetchMock.mockResolvedValue(
-        jsonResponse(200, {
-          qualityGrade: 'A',
-          confidenceScore: 0.97,
-          probabilities: { A: 0.97, B: 0.01, C: 0.01, D: 0.01 },
-          crop: 'mango',
-          cropSupported: true,
-          lowConfidence: false,
-          needsReview: true,
-          reviewReason,
-          photoSimilarity: 0.31,
-          modelStatus: 'trained',
-          modelVersion: 'grade-only-test',
-        }),
-      );
-
-      const result = await service.checkQuality(FARMER, 'mango', image());
-
-      expect(result).toMatchObject({
-        modelGrade: null,
-        suggestedListingGrade: null,
-        probabilities: {},
-        needsReview: true,
-        reviewReason: expected,
-        lowConfidence: true,
-      });
-      expect(predictionModel.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          modelGrade: 'A',
-          reviewReason: expected,
-          photoSimilarity: 0.31,
-        }),
-      );
-      expect(
-        predictionModel.create.mock.calls[0][0].qualityGrade,
-      ).toBeUndefined();
-    },
-  );
-
-  it('fails closed when a trained service does not report photo checks', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse(200, {
-        qualityGrade: 'B',
-        confidenceScore: 0.9,
-        probabilities: { A: 0.05, B: 0.9, C: 0.03, D: 0.02 },
-        crop: 'wheat',
-        cropSupported: true,
-        lowConfidence: false,
-        modelStatus: 'trained',
-        modelVersion: 'grade-only-old',
-      }),
-    );
-
-    const result = await service.checkQuality(FARMER, 'wheat', image());
-
-    expect(result).toMatchObject({
-      modelGrade: null,
-      suggestedListingGrade: null,
-      needsReview: true,
-      reviewReason: 'photo_check_unavailable',
-    });
-  });
-
   it('never suggests a listing grade for a D and keeps the enum-safe field empty', async () => {
     fetchMock.mockResolvedValue(
       jsonResponse(200, {
@@ -266,6 +195,9 @@ describe('AiService', () => {
         crop: 'rice',
         cropSupported: true,
         lowConfidence: false,
+        needsReview: false,
+        reviewReason: null,
+        photoSimilarity: 0.9,
         modelStatus: 'untrained',
         modelVersion: 'grade-cond-efficientnet_b0-untrained',
       }),
@@ -296,48 +228,175 @@ describe('AiService', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("returns a dated official price for the farmer's own market and stores it", async () => {
-    farmerProfileModel.city = 'Faisalabad';
-    fetchMock.mockResolvedValue(
-      jsonResponse(200, {
-        predictedMinPrice: 305,
-        predictedMaxPrice: 305,
-        modelVersion: 'amis-punjab-2026-10-22',
-        method: 'official_wholesale',
-        commodity: 'Rice Basmati Super (New)',
-        observedOn: '2026-10-22',
-        marketScope: 'Faisalabad',
-        marketCount: 1,
-        source: 'AMIS Punjab',
-        sourceUrl: 'http://www.amis.pk',
-      }),
-    );
-
+  const officialPrice = {
+    predictedMinPrice: 198,
+    predictedMaxPrice: 418,
+    unit: 'kg',
+    currency: 'PKR',
+    modelVersion: 'amis-test',
+    method: 'official_wholesale',
+    commodity: 'Rice',
+    observedOn: '2026-10-28',
+    marketScope: 'Lahore',
+    marketCount: 1,
+    source: 'AMIS Punjab',
+    sourceUrl: 'https://amis.pk/prices',
+  };
+  it('forwards profile city and preserves official wholesale provenance without invented confidence', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, officialPrice));
     const result = await service.suggestPrice(FARMER, {
-      productName: 'Basmati Rice',
+      productName: 'Rice',
       category: 'grains',
       unit: ProductUnit.Kg,
     });
-
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(JSON.parse(init.body as string)).toMatchObject({
-      productName: 'Basmati Rice',
-      location: 'Faisalabad',
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+      location: 'Lahore',
     });
-    expect(result).toMatchObject({
-      predictedMinPrice: 305,
-      method: 'official_wholesale',
-      observedOn: '2026-10-22',
-      marketScope: 'Faisalabad',
-      source: 'AMIS Punjab',
-      unit: 'kg',
-    });
+    expect(result).toMatchObject(officialPrice);
+    expect(result).not.toHaveProperty('confidenceScore');
     expect(predictionModel.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        predictionType: PredictionType.Price,
-        predictedMinPrice: 305,
-        modelVersion: 'amis-punjab-2026-10-22',
+      expect.objectContaining(officialPrice),
+    );
+  });
+  it.each([
+    { needsReview: undefined },
+    { reviewReason: undefined },
+    { needsReview: true, reviewReason: 'unfamiliar_photo' },
+    { needsReview: true, reviewReason: 'crop_mismatch' },
+    { lowConfidence: true },
+    {
+      confidenceScore: 0.65,
+      probabilities: { A: 0.65, B: 0.2, C: 0.1, D: 0.05 },
+    },
+    { photoSimilarity: null },
+    { modelStatus: 'untrained' },
+  ])('fails closed for unsafe quality %j', async (override) => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        qualityGrade: 'A',
+        confidenceScore: 0.9,
+        probabilities: { A: 0.9, B: 0.05, C: 0.03, D: 0.02 },
+        crop: 'mango',
+        cropSupported: true,
+        lowConfidence: false,
+        modelStatus: 'trained',
+        modelVersion: 'test',
+        needsReview: false,
+        reviewReason: null,
+        photoSimilarity: 0.9,
+        ...override,
       }),
+    );
+    const result = await service.checkQuality(FARMER, 'mango', image());
+    expect(result.suggestedListingGrade).toBeNull();
+    expect(result).toMatchObject({ needsReview: true });
+  });
+  it.each([
+    { predictedMinPrice: -1 },
+    { predictedMaxPrice: 1 },
+    { method: 'rule_based' },
+    { observedOn: 'bad' },
+    { marketCount: 0 },
+    { unit: 'ton' },
+    { sourceUrl: 'javascript:alert(1)' },
+    { sourceUrl: 'https://user:password@amis.pk' },
+  ])(
+    'rejects malformed upstream price %j without storing',
+    async (override) => {
+      fetchMock.mockResolvedValue(
+        jsonResponse(200, { ...officialPrice, ...override }),
+      );
+      await expect(
+        service.suggestPrice(FARMER, {
+          productName: 'Rice',
+          category: 'grains',
+          unit: ProductUnit.Kg,
+        }),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+      expect(predictionModel.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([null, {}, { qualityGrade: 'Z' }])(
+    'rejects malformed upstream quality %j without persistence',
+    async (output) => {
+      fetchMock.mockResolvedValue(jsonResponse(200, output));
+      await expect(
+        service.checkQuality(FARMER, 'mango', image()),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+      expect(predictionModel.create).not.toHaveBeenCalled();
+    },
+  );
+  it.each([
+    { probabilities: { A: 0.05, B: 0.95, C: 0, D: 0 } },
+    { probabilities: { A: 0.95, B: 0.95, C: 0, D: 0 } },
+    { confidenceScore: 0.8 },
+  ])(
+    'rejects inconsistent quality probabilities %j before persistence',
+    async (override) => {
+      fetchMock.mockResolvedValue(
+        jsonResponse(200, {
+          qualityGrade: 'A',
+          confidenceScore: 0.95,
+          probabilities: { A: 0.95, B: 0.03, C: 0.01, D: 0.01 },
+          crop: 'wheat',
+          cropSupported: true,
+          lowConfidence: false,
+          modelStatus: 'trained',
+          modelVersion: 'test',
+          needsReview: false,
+          reviewReason: null,
+          photoSimilarity: 0.9,
+          ...override,
+        }),
+      );
+      await expect(
+        service.checkQuality(FARMER, 'wheat', image()),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+      expect(predictionModel.create).not.toHaveBeenCalled();
+    },
+  );
+  it('accepts rounded probability sums and a selected maximum tied grade', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        qualityGrade: 'A',
+        confidenceScore: 0.3333,
+        probabilities: { A: 0.3333, B: 0.3333, C: 0.3333, D: 0 },
+        crop: 'wheat',
+        cropSupported: true,
+        lowConfidence: true,
+        modelStatus: 'trained',
+        modelVersion: 'test',
+        needsReview: true,
+        reviewReason: 'low_confidence',
+        photoSimilarity: 0.9,
+      }),
+    );
+    await expect(
+      service.checkQuality(FARMER, 'wheat', image()),
+    ).resolves.toMatchObject({
+      needsReview: true,
+      suggestedListingGrade: null,
+    });
+    expect(predictionModel.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not expose uncontracted upstream price metadata', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        ...officialPrice,
+        confidenceScore: 0.99,
+        basis: 'crop',
+      }),
+    );
+    const result = await service.suggestPrice(FARMER, {
+      productName: 'Rice',
+      category: 'grains',
+      unit: ProductUnit.Kg,
+    });
+    expect(result).not.toHaveProperty('confidenceScore');
+    expect(predictionModel.create.mock.calls[0][0]).not.toHaveProperty(
+      'confidenceScore',
     );
   });
 

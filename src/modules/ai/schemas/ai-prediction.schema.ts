@@ -89,20 +89,34 @@ export class AiPrediction {
   @Prop({ min: 0, max: 1 })
   confidenceScore?: number;
 
-  /** Why the grade was withheld from the farmer; absent when it was shown. */
-  @Prop({
-    type: String,
-    enum: ['low_confidence', 'unfamiliar_photo', 'photo_check_unavailable'],
-  })
-  reviewReason?: string;
-
-  /** Similarity of the photo to the training photos, for evaluation. */
-  @Prop()
-  photoSimilarity?: number;
-
   /** e.g. 'price-v1.2' - tracked for model evaluation. */
   @Prop()
   modelVersion?: string;
+
+  @Prop()
+  needsReview?: boolean;
+  @Prop({ type: String, default: null })
+  reviewReason?: string | null;
+  @Prop({ type: Number, default: null })
+  photoSimilarity?: number | null;
+  @Prop()
+  method?: string;
+  @Prop()
+  currency?: string;
+  @Prop()
+  unit?: string;
+  @Prop()
+  commodity?: string;
+  @Prop()
+  observedOn?: string;
+  @Prop()
+  marketScope?: string;
+  @Prop()
+  marketCount?: number;
+  @Prop()
+  source?: string;
+  @Prop()
+  sourceUrl?: string;
 
   createdAt!: Date;
 }

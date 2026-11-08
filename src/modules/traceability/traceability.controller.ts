@@ -1,3 +1,4 @@
+import { OrderTraceResponseDto } from './dto/order-trace-response.dto';
 import { Controller, Get, Param } from '@nestjs/common';
 import {
   ApiOkResponse,
@@ -15,6 +16,15 @@ import { TraceabilityService } from './traceability.service';
 @Controller('trace')
 export class TraceabilityController {
   constructor(private readonly traceabilityService: TraceabilityService) {}
+
+  @Get('orders/:id')
+  @Public()
+  @PublicTraceRateLimit()
+  @ApiOkResponse({ type: OrderTraceResponseDto })
+  @ApiErrorResponses(404, 429)
+  traceOrder(@Param('id') id: string): Promise<OrderTraceResponseDto> {
+    return this.traceabilityService.traceOrder(id);
+  }
 
   @Get('products/:id')
   @Public()

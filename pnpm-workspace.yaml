@@ -2,10 +2,10 @@ packages:
   - '.'
 dangerouslyAllowAllBuilds: true
 overrides:
-  multer@<2.4.0: 2.4.0
+  multer@<2.5.0: 2.5.0
   js-yaml@>=4.0.0 <4.3.2: 4.3.2
-  body-parser@>=2.0.0 <2.3.0: 2.3.0
-  qs@<6.16.0: 6.16.0
+  body-parser@>=2.0.0 <2.4.0: 2.4.0
+  qs@<6.16.1: 6.16.1
   brace-expansion@>=2.0.0 <2.1.7: 2.1.7
   proxy-addr@<2.0.8: 2.0.8
   '@fastify/busboy@<3.2.2': 3.2.2

@@ -18,6 +18,14 @@ import {
 export const GRADABLE_CROPS = ['wheat', 'rice', 'mango', 'maize'] as const;
 export type GradableCrop = (typeof GRADABLE_CROPS)[number];
 
+export type ReviewReason =
+  | 'low_confidence'
+  | 'crop_mismatch'
+  | 'unfamiliar_photo'
+  | 'photo_check_unavailable'
+  | 'unsupported_crop'
+  | 'untrained_model';
+
 export type ModelStatus = 'trained' | 'untrained';
 
 export class QualityCheckRequestDto {
@@ -29,23 +37,12 @@ export class QualityCheckRequestDto {
   crop!: GradableCrop;
 }
 
-export const QUALITY_REVIEW_REASONS = [
-  'low_confidence',
-  'unfamiliar_photo',
-  'photo_check_unavailable',
-] as const;
-export type QualityReviewReason = (typeof QUALITY_REVIEW_REASONS)[number];
-
 export class QualityCheckResponseDto {
   @ApiProperty({ description: 'Stored ai_predictions id' })
   predictionId!: string;
 
-  @ApiProperty({
-    enum: ['A', 'B', 'C', 'D'],
-    nullable: true,
-    description: 'Raw model grade; null when the photo needs review.',
-  })
-  modelGrade!: 'A' | 'B' | 'C' | 'D' | null;
+  @ApiProperty({ enum: ['A', 'B', 'C', 'D'], description: 'Raw model grade' })
+  modelGrade!: 'A' | 'B' | 'C' | 'D';
 
   @ApiPropertyOptional({
     enum: QualityGrade,
@@ -54,6 +51,25 @@ export class QualityCheckResponseDto {
       'Optional grade suggestion for the selected supported crop; null for unsupported output or D (below listable grades).',
   })
   suggestedListingGrade!: QualityGrade | null;
+
+  @ApiProperty()
+  needsReview!: boolean;
+
+  @ApiProperty({
+    nullable: true,
+    enum: [
+      'low_confidence',
+      'crop_mismatch',
+      'unfamiliar_photo',
+      'photo_check_unavailable',
+      'unsupported_crop',
+      'untrained_model',
+    ],
+  })
+  reviewReason!: ReviewReason | null;
+
+  @ApiProperty({ nullable: true, type: Number })
+  photoSimilarity!: number | null;
 
   @ApiProperty({ example: 0.82 })
   confidenceScore!: number;
@@ -71,15 +87,6 @@ export class QualityCheckResponseDto {
 
   @ApiProperty()
   lowConfidence!: boolean;
-
-  @ApiProperty({
-    description:
-      'True when no grade can be shown: ask the farmer to retake the photo or choose the grade manually.',
-  })
-  needsReview!: boolean;
-
-  @ApiPropertyOptional({ enum: QUALITY_REVIEW_REASONS, nullable: true })
-  reviewReason!: QualityReviewReason | null;
 
   @ApiProperty({
     enum: ['trained', 'untrained'],
@@ -134,37 +141,32 @@ export class PriceSuggestionResponseDto {
   @ApiProperty({ enum: ProductUnit })
   unit!: ProductUnit;
 
-  @ApiProperty({
-    enum: ['official_wholesale'],
-    description:
-      'Observed AMIS Punjab wholesale mandi prices for a dated trading day, not a prediction.',
-  })
+  @ApiProperty({ enum: ['official_wholesale'] })
   method!: 'official_wholesale';
 
-  @ApiProperty({ example: 'Wheat', description: 'Official commodity name(s)' })
+  @ApiProperty({ enum: ['PKR'] })
+  currency!: 'PKR';
+
+  @ApiProperty()
+  modelVersion!: string;
+
+  @ApiProperty()
   commodity!: string;
 
-  @ApiProperty({ example: '2026-10-22', description: 'Mandi trading day' })
+  @ApiProperty({ example: '2026-10-28' })
   observedOn!: string;
 
-  @ApiProperty({
-    example: 'Faisalabad',
-    description:
-      "The farmer's own market, or Punjab for the middle half of markets",
-  })
+  @ApiProperty()
   marketScope!: string;
 
-  @ApiProperty({ example: 13 })
+  @ApiProperty()
   marketCount!: number;
 
-  @ApiProperty({ example: 'AMIS Punjab' })
+  @ApiProperty()
   source!: string;
 
-  @ApiProperty({ example: 'http://www.amis.pk' })
+  @ApiProperty()
   sourceUrl!: string;
-
-  @ApiProperty({ example: 'amis-punjab-2026-10-22' })
-  modelVersion!: string;
 }
 
 export class AiStatusResponseDto {
@@ -179,6 +181,6 @@ export class AiStatusResponseDto {
   @ApiPropertyOptional({ type: [String] })
   trainedCrops?: string[];
 
-  @ApiPropertyOptional({ example: 'official_wholesale' })
+  @ApiPropertyOptional({ example: 'rule_based' })
   priceMethod?: string;
 }

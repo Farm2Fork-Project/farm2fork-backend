@@ -21,6 +21,8 @@ import { ApiErrorResponses } from '../../common/decorators/api-error-responses.d
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
 import type { RequestUser } from '../../common/guards/roles.guard';
+import { OrderProvenanceService } from './order-provenance.service';
+import { OrderQrResponseDto } from './dto/order-qr-response.dto';
 import { OrderService } from './order.service';
 import {
   CreateOrderDto,
@@ -34,7 +36,10 @@ import {
 @ApiBearerAuth('JWT-auth')
 @Controller('orders')
 export class OrderController {
-  constructor(private readonly orderService: OrderService) {}
+  constructor(
+    private readonly orderService: OrderService,
+    private readonly provenance: OrderProvenanceService,
+  ) {}
 
   @Post()
   @Roles(UserRole.Buyer)
@@ -96,6 +101,17 @@ export class OrderController {
     @Param('id') id: string,
   ): Promise<OrderResponseDto> {
     return this.orderService.findOne(id, user);
+  }
+
+  @Get(':id/qr')
+  @Roles(UserRole.Buyer, UserRole.Farmer, UserRole.Transporter, UserRole.Admin)
+  @ApiOkResponse({ type: OrderQrResponseDto })
+  @ApiErrorResponses(401, 403, 404, 503)
+  getQr(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+  ): Promise<OrderQrResponseDto> {
+    return this.provenance.getQr(id, user);
   }
 
   @Patch(':id/cancel')

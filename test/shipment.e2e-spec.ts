@@ -147,6 +147,32 @@ describe('TransportService self-claim transaction integration', () => {
     });
   });
 
+  it('stores the estimated delivery time on a claimed shipment', async () => {
+    const { order } = await createClaimableOrder();
+    const before = Date.now();
+
+    const response = await service.claim(
+      order.id,
+      (await onlineTransporter()).toHexString(),
+    );
+
+    const stored = await shipmentModel
+      .findOne({ orderId: order._id })
+      .lean()
+      .exec();
+    const twoDaysMs = 48 * 60 * 60 * 1000;
+    expect(stored?.estimatedDelivery).toBeInstanceOf(Date);
+    expect(stored!.estimatedDelivery!.getTime()).toBeGreaterThanOrEqual(
+      before + twoDaysMs,
+    );
+    expect(stored!.estimatedDelivery!.getTime()).toBeLessThanOrEqual(
+      Date.now() + twoDaysMs,
+    );
+    expect(response.estimatedDelivery).toBe(
+      stored!.estimatedDelivery!.toISOString(),
+    );
+  });
+
   it('records one pending shipment event per distinct product in a claimed order', async () => {
     const productA = new Types.ObjectId();
     const productB = new Types.ObjectId();

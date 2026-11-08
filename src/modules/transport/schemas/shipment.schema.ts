@@ -123,11 +123,11 @@ export class Shipment {
   @Prop({ type: [ShipmentStatusHistoryEntrySchema], default: [] })
   statusHistory!: ShipmentStatusHistoryEntry[];
 
-  @Prop()
   /** Delivery fee snapshot from the order: what the transporter earns. */
   @Prop({ min: 0 })
   deliveryFee?: number;
 
+  @Prop()
   estimatedDelivery?: Date;
 
   @Prop()

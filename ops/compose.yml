@@ -73,12 +73,16 @@ services:
     environment:
       AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:?AI_SERVICE_TOKEN required}
       ALLOW_UNTRAINED_MODEL: "false"
-      AI_REQUIRE_TRAINED: ${AI_REQUIRE_TRAINED:-false}
-      MODEL_CHECKPOINT: /app/models/checkpoints/grade_cond_dedup/best_model.pth
+      APP_ENV: production
+      AI_REQUIRE_TRAINED: ${AI_REQUIRE_TRAINED:-true}
+      MODEL_CHECKPOINT: /app/models/best_model.pth
+      # Crop-match check (CLIP ViT-B/32 weights, mounted with the model files).
+      # Must exist before this release: a missing file stops the AI service.
+      CROP_MATCH_WEIGHTS: ${CROP_MATCH_WEIGHTS:-/app/models/crop-match/open_clip_model.safetensors}
       OMP_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"
     volumes:
-      - /opt/farm2fork/models:/app/models/checkpoints/grade_cond_dedup:ro
+      - /opt/farm2fork/models:/app/models:ro
       - /opt/farm2fork/ops/ai-probe.py:/ops/ai-probe.py:ro
     networks: [app]
     healthcheck:

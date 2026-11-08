@@ -1,3 +1,4 @@
+import { jwtSecret } from './jwt-config';
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
@@ -39,8 +40,7 @@ import { AuditLog, AuditLogSchema } from '../admin/schemas/audit-log.schema';
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
-        secret:
-          configService.get<string>('JWT_SECRET') ?? 'dev-insecure-secret',
+        secret: jwtSecret(configService),
         signOptions: {
           expiresIn: (configService.get<string>('JWT_EXPIRATION') ??
             '24h') as JwtSignOptions['expiresIn'],

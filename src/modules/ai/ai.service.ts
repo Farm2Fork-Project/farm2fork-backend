@@ -23,7 +23,7 @@ import {
   PriceSuggestionRequestDto,
   PriceSuggestionResponseDto,
   QualityCheckResponseDto,
-  QualityReviewReason,
+  ReviewReason,
 } from './dto/ai.dto';
 import {
   AiPrediction,
@@ -42,32 +42,20 @@ interface UploadedImage {
 }
 
 interface ServiceQuality {
+  needsReview?: boolean;
+  reviewReason?: ReviewReason | null;
+  photoSimilarity?: number | null;
   qualityGrade: 'A' | 'B' | 'C' | 'D';
   confidenceScore: number;
   probabilities: Record<string, number>;
   crop: GradableCrop;
   cropSupported: boolean;
   lowConfidence: boolean;
-  /** Absent from AI services that predate photo checks. */
-  needsReview?: boolean;
-  reviewReason?: QualityReviewReason | null;
-  photoSimilarity?: number | null;
   modelStatus: ModelStatus;
   modelVersion: string;
 }
 
-interface ServicePrice {
-  predictedMinPrice: number;
-  predictedMaxPrice: number;
-  modelVersion: string;
-  method: 'official_wholesale';
-  commodity: string;
-  observedOn: string;
-  marketScope: string;
-  marketCount: number;
-  source: string;
-  sourceUrl: string;
-}
+type ServicePrice = Omit<PriceSuggestionResponseDto, 'predictionId'>;
 
 /**
  * AiModule (EP-05) - HTTP client for the farm2fork-ai FastAPI service
@@ -81,9 +69,9 @@ export class AiService {
   constructor(
     @InjectModel(AiPrediction.name)
     private readonly predictionModel: Model<AiPredictionDocument>,
+    private readonly config: ConfigService,
     @InjectModel(FarmerProfile.name)
     private readonly farmerProfileModel: Model<FarmerProfileDocument>,
-    private readonly config: ConfigService,
   ) {}
 
   async status(): Promise<AiStatusResponseDto> {
@@ -137,49 +125,55 @@ export class AiService {
       body: form,
     });
 
-    // A trained grade is shown only when the service positively cleared it:
-    // an older service without photo checks fails closed into review.
-    const reviewReason: QualityReviewReason | null =
-      result.modelStatus !== 'trained'
-        ? null
-        : result.needsReview === false
-          ? null
-          : (result.reviewReason ?? 'photo_check_unavailable');
-    const needsReview = reviewReason !== null;
-    const suggestedListingGrade =
-      needsReview ||
+    this.validateQuality(result);
+    const unsupported =
       result.cropSupported !== true ||
       result.crop !== crop ||
-      !GRADABLE_CROPS.includes(result.crop) ||
-      result.qualityGrade === 'D'
-        ? null
-        : (result.qualityGrade as QualityGrade);
+      !GRADABLE_CROPS.includes(result.crop);
+    const reviewReason: ReviewReason | null = unsupported
+      ? 'unsupported_crop'
+      : result.modelStatus !== 'trained'
+        ? 'untrained_model'
+        : result.needsReview === true && result.reviewReason != null
+          ? result.reviewReason
+          : result.lowConfidence !== false || result.confidenceScore < 0.7
+            ? 'low_confidence'
+            : result.needsReview !== false
+              ? (result.reviewReason ?? 'photo_check_unavailable')
+              : result.photoSimilarity == null ||
+                  result.reviewReason === undefined
+                ? 'photo_check_unavailable'
+                : (result.reviewReason ?? null);
+    const needsReview = reviewReason !== null || result.qualityGrade === 'D';
+    const suggestedListingGrade = needsReview
+      ? null
+      : (result.qualityGrade as QualityGrade);
+    const review = {
+      needsReview,
+      reviewReason,
+      photoSimilarity: result.photoSimilarity ?? null,
+    };
     const stored = await this.predictionModel.create({
       userId: new Types.ObjectId(farmerId),
       predictionType: PredictionType.Quality,
       inputData: { productName: crop, category: crop },
       qualityGrade: suggestedListingGrade ?? undefined,
+      ...review,
       modelGrade: result.qualityGrade,
       confidenceScore: result.confidenceScore,
-      reviewReason: reviewReason ?? undefined,
-      photoSimilarity: result.photoSimilarity ?? undefined,
       modelVersion: result.modelVersion,
     });
 
-    // The raw output stays in ai_predictions for evaluation; a referred grade
-    // never reaches the farmer, who retakes the photo or grades manually.
     return {
       predictionId: stored._id.toHexString(),
-      modelGrade: needsReview ? null : result.qualityGrade,
+      ...review,
+      modelGrade: result.qualityGrade,
       suggestedListingGrade,
       confidenceScore: result.confidenceScore,
-      probabilities: needsReview ? {} : result.probabilities,
+      probabilities: result.probabilities,
       crop: result.crop,
       cropSupported: result.cropSupported,
-      // Older clients only know lowConfidence; keep their warning visible.
-      lowConfidence: needsReview || result.lowConfidence,
-      needsReview,
-      reviewReason,
+      lowConfidence: result.lowConfidence,
       modelStatus: result.modelStatus,
       modelVersion: result.modelVersion,
     };
@@ -189,26 +183,56 @@ export class AiService {
     farmerId: string,
     input: PriceSuggestionRequestDto,
   ): Promise<PriceSuggestionResponseDto> {
-    // The farmer's city selects their own mandi when it reported that day.
     const profile = await this.farmerProfileModel
       .findOne({ userId: new Types.ObjectId(farmerId) })
       .select('farmLocation.city')
       .lean()
       .exec();
+    const city = profile?.farmLocation?.city?.trim() || undefined;
     const result = await this.call<ServicePrice>('/predict/price', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        location: city,
         productName: input.productName,
         category: input.category,
         unit: input.unit,
         quantity: input.quantity,
         qualityGrade: input.qualityGrade,
-        location: profile?.farmLocation?.city,
       }),
     });
 
+    this.validatePrice(result, input.unit);
+    const {
+      predictedMinPrice,
+      predictedMaxPrice,
+      unit,
+      currency,
+      modelVersion,
+      method,
+      commodity,
+      observedOn,
+      marketScope,
+      marketCount,
+      source,
+      sourceUrl,
+    } = result;
+    const price = {
+      predictedMinPrice,
+      predictedMaxPrice,
+      unit,
+      currency,
+      modelVersion,
+      method,
+      commodity,
+      observedOn,
+      marketScope,
+      marketCount,
+      source,
+      sourceUrl,
+    };
     const stored = await this.predictionModel.create({
+      ...price,
       userId: new Types.ObjectId(farmerId),
       predictionType: PredictionType.Price,
       inputData: {
@@ -216,6 +240,7 @@ export class AiService {
         category: input.category,
         quantity: input.quantity,
         unit: input.unit,
+        location: city,
       },
       predictedMinPrice: result.predictedMinPrice,
       predictedMaxPrice: result.predictedMaxPrice,
@@ -224,18 +249,108 @@ export class AiService {
 
     return {
       predictionId: stored._id.toHexString(),
-      predictedMinPrice: result.predictedMinPrice,
-      predictedMaxPrice: result.predictedMaxPrice,
-      unit: input.unit,
-      method: result.method,
-      commodity: result.commodity,
-      observedOn: result.observedOn,
-      marketScope: result.marketScope,
-      marketCount: result.marketCount,
-      source: result.source,
-      sourceUrl: result.sourceUrl,
-      modelVersion: result.modelVersion,
+      ...price,
     };
+  }
+
+  private invalidResponse(): never {
+    throw new ServiceUnavailableException(
+      'The AI service returned an invalid response. Please try again shortly.',
+    );
+  }
+
+  private validateQuality(result: ServiceQuality): void {
+    if (
+      !result ||
+      !['A', 'B', 'C', 'D'].includes(result.qualityGrade) ||
+      !Number.isFinite(result.confidenceScore) ||
+      result.confidenceScore < 0 ||
+      result.confidenceScore > 1 ||
+      typeof result.crop !== 'string' ||
+      typeof result.cropSupported !== 'boolean' ||
+      typeof result.lowConfidence !== 'boolean' ||
+      !['trained', 'untrained'].includes(result.modelStatus) ||
+      typeof result.modelVersion !== 'string' ||
+      !result.modelVersion.trim() ||
+      !result.probabilities ||
+      ['A', 'B', 'C', 'D'].some(
+        (grade) =>
+          !Number.isFinite(result.probabilities[grade]) ||
+          result.probabilities[grade] < 0 ||
+          result.probabilities[grade] > 1,
+      ) ||
+      (result.needsReview !== undefined &&
+        typeof result.needsReview !== 'boolean') ||
+      (result.reviewReason != null &&
+        ![
+          'low_confidence',
+          'crop_mismatch',
+          'unfamiliar_photo',
+          'photo_check_unavailable',
+          'unsupported_crop',
+          'untrained_model',
+        ].includes(result.reviewReason)) ||
+      (result.photoSimilarity != null &&
+        (!Number.isFinite(result.photoSimilarity) ||
+          result.photoSimilarity < -1 ||
+          result.photoSimilarity > 1))
+    )
+      this.invalidResponse();
+    // The Python service rounds probabilities and confidence to four decimals.
+    // A 0.001 tolerance covers their cumulative rounding without accepting a
+    // contradictory confidence or a grade other than a (possibly tied) maximum.
+    const probabilities = ['A', 'B', 'C', 'D'].map(
+      (grade) => result.probabilities[grade],
+    );
+    const selected = result.probabilities[result.qualityGrade];
+    if (
+      Math.abs(probabilities.reduce((sum, value) => sum + value, 0) - 1) >
+        0.001 ||
+      Math.abs(result.confidenceScore - selected) > 0.001 ||
+      selected < Math.max(...probabilities)
+    )
+      this.invalidResponse();
+  }
+
+  private validatePrice(result: ServicePrice, unit: string): void {
+    if (
+      !result ||
+      result.method !== 'official_wholesale' ||
+      result.currency !== 'PKR' ||
+      String(result.unit) !== unit ||
+      !Number.isFinite(result.predictedMinPrice) ||
+      result.predictedMinPrice <= 0 ||
+      !Number.isFinite(result.predictedMaxPrice) ||
+      result.predictedMaxPrice < result.predictedMinPrice ||
+      !Number.isInteger(result.marketCount) ||
+      result.marketCount < 1 ||
+      (
+        [
+          'modelVersion',
+          'commodity',
+          'marketScope',
+          'source',
+          'sourceUrl',
+        ] as const
+      ).some((key) => typeof result[key] !== 'string' || !result[key].trim()) ||
+      typeof result.observedOn !== 'string' ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(result.observedOn) ||
+      !Number.isFinite(Date.parse(result.observedOn)) ||
+      new Date(result.observedOn).toISOString().slice(0, 10) !==
+        result.observedOn ||
+      result.observedOn > new Date().toISOString().slice(0, 10)
+    )
+      this.invalidResponse();
+    try {
+      if (
+        !['https:', 'http:'].includes(new URL(result.sourceUrl).protocol) ||
+        new URL(result.sourceUrl).username ||
+        new URL(result.sourceUrl).password
+      )
+        this.invalidResponse();
+    } catch {
+      this.invalidResponse();
+    }
   }
 
   /**

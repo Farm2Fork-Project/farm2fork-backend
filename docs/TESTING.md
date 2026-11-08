@@ -239,21 +239,24 @@ from Farm2Fork's records rather than a fresh ledger read.
 
 ## 8. AI model
 
-The service wraps the crop-conditioned EfficientNet grade model. Until
-training finishes, it runs in a clearly labelled **untrained preview** mode
-with random weights, so grades are not meaningful yet. When
-`best_model.pth` is ready:
+The release service uses the frozen grade-only four-crop configuration
+`grade_only_four_crops_dedup_15ep.yaml`, trained checkpoint and a
+fingerprint-matched photo reference. `ops/compose.yml` mounts
+`/opt/farm2fork/models/best_model.pth` at `/app/models/best_model.pth`.
+Back up this separately supplied artifact and verify its fingerprint against
+the reference packaged in the AI image before deployment. No model weights
+are fabricated by CI.
 
-```bash
-cp best_model.pth ../farm2fork-ai/models/checkpoints/grade_cond_dedup/
-docker compose -f docker-compose.local.yml restart ai
-curl localhost:8000/health    # qualityModel: "trained"
-```
+Release readiness defaults to `AI_REQUIRE_TRAINED=true` and requires both
+`qualityModel: trained` and `photoCheck: enabled`. An explicit degraded-mode
+opt-out does not establish quality readiness. Backend and clients reject
+applying review-required, low-confidence, unsupported or untrained grades.
+A trained health response is not evidence of field accuracy.
 
-No code changes are needed. Price suggestions come from
-`farm2fork-ai/configs/price_rules.yaml`. Those values are illustrative and
-should be replaced with sourced market rates before any demo that quotes
-prices.
+Prices use sourced AMIS official wholesale observations, with date, source,
+commodity and market provenance. They are historical wholesale references,
+not farm-gate guarantees or live quotes. Unsupported units/commodities
+return validation errors so farmers can enter a price manually.
 
 ## 9. Automated suites
 

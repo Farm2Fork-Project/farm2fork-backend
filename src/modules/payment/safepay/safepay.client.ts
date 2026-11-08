@@ -41,6 +41,9 @@ export class SafepayClient {
     orderId: string;
   }): Promise<SafepayTracker> {
     const publicKey = this.requireConfig('publicKey', 'SAFEPAY_PUBLIC_KEY');
+    // The sandbox rejects tracker creation (401 "merchant webhook secret not
+    // found in the request header") unless the merchant secret key is sent too.
+    const secretKey = this.requireConfig('secretKey', 'SAFEPAY_SECRET_KEY');
     // Cybersource (Safepay's underlying processor) takes amounts in the
     // currency's minor unit - PKR has 2 decimal places, hence x100.
     const amountInSubunits = Math.round(params.amount * 100);
@@ -49,6 +52,7 @@ export class SafepayClient {
       data?: { tracker?: { token?: string; state?: string } };
     }>('/order/payments/v3/', {
       method: 'POST',
+      headers: { 'X-SFPY-MERCHANT-SECRET': secretKey },
       body: {
         merchant_api_key: publicKey,
         intent: 'CYBERSOURCE',

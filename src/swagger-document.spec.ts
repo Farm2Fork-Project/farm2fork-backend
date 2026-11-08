@@ -1,3 +1,4 @@
+import { OrderProvenanceService } from './modules/order/order-provenance.service';
 import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
@@ -39,6 +40,7 @@ describe('createSwaggerDocument', () => {
         { provide: ConfigService, useValue: new ConfigService() },
         { provide: MarketplaceService, useValue: {} },
         { provide: OrderService, useValue: {} },
+        { provide: OrderProvenanceService, useValue: {} },
         { provide: PaymentService, useValue: {} },
         { provide: TransportService, useValue: {} },
         { provide: TraceabilityService, useValue: {} },
