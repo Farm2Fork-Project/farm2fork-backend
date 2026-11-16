@@ -11,6 +11,7 @@ import { Test } from '@nestjs/testing';
 import { Types } from 'mongoose';
 import { ProductUnit } from '../marketplace/schemas/product.schema';
 import { FarmerProfile } from '../auth/schemas/farmer-profile.schema';
+import { RateListService } from '../rates/rate-list.service';
 import { AiService } from './ai.service';
 import {
   GRADABLE_CROPS,
@@ -57,6 +58,10 @@ describe('AiService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         AiService,
+        {
+          provide: RateListService,
+          useValue: { reference: jest.fn().mockResolvedValue(undefined) },
+        },
         {
           provide: getModelToken(FarmerProfile.name),
           useValue: {

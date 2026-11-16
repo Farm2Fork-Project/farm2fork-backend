@@ -15,6 +15,7 @@ import {
   FarmerProfileDocument,
 } from '../auth/schemas/farmer-profile.schema';
 import { QualityGrade } from '../marketplace/schemas/product.schema';
+import { RateListService, RateReference } from '../rates/rate-list.service';
 import {
   AiStatusResponseDto,
   GRADABLE_CROPS,
@@ -72,6 +73,7 @@ export class AiService {
     private readonly config: ConfigService,
     @InjectModel(FarmerProfile.name)
     private readonly farmerProfileModel: Model<FarmerProfileDocument>,
+    private readonly rates: RateListService,
   ) {}
 
   async status(): Promise<AiStatusResponseDto> {
@@ -189,19 +191,16 @@ export class AiService {
       .lean()
       .exec();
     const city = profile?.farmLocation?.city?.trim() || undefined;
-    const result = await this.call<ServicePrice>('/predict/price', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        location: city,
-        productName: input.productName,
-        category: input.category,
-        unit: input.unit,
-        quantity: input.quantity,
-        qualityGrade: input.qualityGrade,
-      }),
-    });
-
+    // An admin-published rate list is newer and closer to the farmer than
+    // the AI service's bundled snapshot, so it answers first.
+    const listed = await this.rates.reference(
+      input.productName,
+      input.unit,
+      city,
+    );
+    const result = listed
+      ? this.fromRateList(listed)
+      : await this.requestServicePrice(input, city);
     this.validatePrice(result, input.unit);
     const {
       predictedMinPrice,
@@ -251,6 +250,42 @@ export class AiService {
       predictionId: stored._id.toHexString(),
       ...price,
     };
+  }
+
+  private requestServicePrice(
+    input: PriceSuggestionRequestDto,
+    city: string | undefined,
+  ): Promise<ServicePrice> {
+    return this.call<ServicePrice>('/predict/price', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        location: city,
+        productName: input.productName,
+        category: input.category,
+        unit: input.unit,
+        quantity: input.quantity,
+        qualityGrade: input.qualityGrade,
+      }),
+    });
+  }
+
+  /** Same shape the AI service returns, so both sources share one validation. */
+  private fromRateList(rate: RateReference): ServicePrice {
+    return {
+      predictedMinPrice: rate.minPrice,
+      predictedMaxPrice: rate.maxPrice,
+      unit: rate.unit,
+      currency: 'PKR',
+      modelVersion: `rate-list-${rate.observedOn}`,
+      method: 'official_wholesale',
+      commodity: rate.commodity,
+      observedOn: rate.observedOn,
+      marketScope: rate.market,
+      marketCount: 1,
+      source: rate.source,
+      sourceUrl: rate.sourceUrl,
+    } as ServicePrice;
   }
 
   private invalidResponse(): never {

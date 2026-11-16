@@ -32,11 +32,23 @@ import {
   CommentDocument,
   CommentStatus,
 } from '../community/schemas/comment.schema';
+import {
+  ContentReport,
+  ContentReportDocument,
+  ReportStatus,
+  ReportTarget,
+} from '../community/schemas/content-report.schema';
+import {
+  Review,
+  ReviewDocument,
+  ReviewStatus,
+} from '../community/schemas/review.schema';
 import { AuditLog, AuditLogDocument } from './schemas/audit-log.schema';
 import type { RequestUser } from '../../common/guards/roles.guard';
 import type {
   ContentQueryDto,
   ContentVisibilityDto,
+  ResolveReportsDto,
 } from './admin-content.controller';
 
 export interface AdminPostDetail {
@@ -99,7 +111,204 @@ export class AdminContentService {
     @InjectModel(AuditLog.name)
     private readonly auditModel: Model<AuditLogDocument>,
     @InjectConnection() private readonly connection: Connection,
+    @InjectModel(ContentReport.name)
+    private readonly reportModel: Model<ContentReportDocument>,
+    @InjectModel(Review.name)
+    private readonly reviewModel: Model<ReviewDocument>,
   ) {}
+
+  /**
+   * Member reports grouped by the reported item, most reported first, each
+   * with enough of the content to decide without opening another screen.
+   */
+  async reports(query: Partial<ContentQueryDto>) {
+    const { page, limit } = pageValues(query);
+    const status =
+      contentStatus(query.status, Object.values(ReportStatus)) ??
+      ReportStatus.Open;
+    const groups = await this.reportModel
+      .aggregate<{
+        _id: { targetType: ReportTarget; targetId: Types.ObjectId };
+        count: number;
+        reasons: string[];
+        notes: (string | null)[];
+        latestAt: Date;
+      }>([
+        { $match: { status } },
+        { $sort: { createdAt: -1 } },
+        {
+          $group: {
+            _id: { targetType: '$targetType', targetId: '$targetId' },
+            count: { $sum: 1 },
+            reasons: { $addToSet: '$reason' },
+            notes: { $push: '$note' },
+            latestAt: { $max: '$createdAt' },
+          },
+        },
+        { $sort: { count: -1, latestAt: -1 } },
+        { $skip: (page - 1) * limit },
+        { $limit: limit },
+      ])
+      .exec();
+    const totalRows = await this.reportModel
+      .aggregate<{
+        total: number;
+      }>([
+        { $match: { status } },
+        { $group: { _id: { t: '$targetType', i: '$targetId' } } },
+        { $count: 'total' },
+      ])
+      .exec();
+    const idsOf = (type: ReportTarget) =>
+      groups
+        .filter((g) => g._id.targetType === type)
+        .map((g) => g._id.targetId);
+    const [posts, comments, reviews] = await Promise.all([
+      this.postModel
+        .find({ _id: { $in: idsOf(ReportTarget.Post) } })
+        .select('authorId title content status')
+        .populate('authorId', USER_FIELDS)
+        .lean()
+        .exec(),
+      this.commentModel
+        .find({ _id: { $in: idsOf(ReportTarget.Comment) } })
+        .select('authorId postId content status')
+        .populate('authorId', USER_FIELDS)
+        .lean()
+        .exec(),
+      this.reviewModel
+        .find({ _id: { $in: idsOf(ReportTarget.Review) } })
+        .select('buyerId farmerId rating comment status')
+        .populate('buyerId', USER_FIELDS)
+        .lean()
+        .exec(),
+    ]);
+    const content = new Map<string, Record<string, unknown>>();
+    for (const post of posts)
+      content.set(String(post._id), {
+        title: post.title,
+        text: post.content,
+        author: post.authorId,
+        hidden: post.status === PostStatus.Removed,
+      });
+    for (const comment of comments)
+      content.set(String(comment._id), {
+        text: comment.content,
+        author: comment.authorId,
+        postId: String(comment.postId),
+        hidden: comment.status === CommentStatus.Removed,
+      });
+    for (const review of reviews)
+      content.set(String(review._id), {
+        title: `${review.rating} out of 5`,
+        text: review.comment ?? '',
+        author: review.buyerId,
+        hidden: review.status === ReviewStatus.Removed,
+      });
+    return {
+      items: groups.map((group) => ({
+        targetType: group._id.targetType,
+        targetId: String(group._id.targetId),
+        reportCount: group.count,
+        reasons: group.reasons,
+        notes: group.notes.filter((note): note is string => !!note).slice(0, 5),
+        latestAt: group.latestAt,
+        content: content.get(String(group._id.targetId)) ?? null,
+      })),
+      total: totalRows[0]?.total ?? 0,
+      page,
+      limit,
+    };
+  }
+
+  /** Close every open report on an item, hiding the item when asked to. */
+  async resolveReports(
+    targetType: string,
+    id: string,
+    dto: ResolveReportsDto,
+    actor: RequestUser,
+  ) {
+    if (!Object.values(ReportTarget).includes(targetType as ReportTarget))
+      throw new BadRequestException('Unsupported report target');
+    const targetId = objectId(id);
+    const open = await this.reportModel
+      .countDocuments({ targetType, targetId, status: ReportStatus.Open })
+      .exec();
+    if (open === 0)
+      throw new ConflictException('No open reports on this item. Refresh.');
+    if (dto.action === 'hide') {
+      try {
+        await this.visibility(
+          targetType as ReportTarget,
+          id,
+          { hidden: true, reason: dto.reason },
+          actor,
+        );
+      } catch (error) {
+        // Already hidden by its author or another admin: still close the reports.
+        if (!(error instanceof ConflictException)) throw error;
+      }
+    }
+    await this.reportModel
+      .updateMany(
+        { targetType, targetId, status: ReportStatus.Open },
+        {
+          $set: {
+            status:
+              dto.action === 'hide'
+                ? ReportStatus.Actioned
+                : ReportStatus.Dismissed,
+            resolvedBy: objectId(actor.id),
+            resolvedAt: new Date(),
+          },
+        },
+      )
+      .exec();
+    await this.auditModel.create({
+      actorId: objectId(actor.id),
+      actorRole: actor.role,
+      action: `report.${dto.action === 'hide' ? 'actioned' : 'dismissed'}`,
+      targetEntity:
+        targetType === 'post'
+          ? 'Post'
+          : targetType === 'comment'
+            ? 'Comment'
+            : 'Review',
+      targetId,
+      metadata: {
+        before: { openReports: open },
+        after: { openReports: 0, reason: dto.reason.trim() },
+      },
+    });
+    return { targetType, targetId: id, resolved: open, action: dto.action };
+  }
+
+  async reviews(query: Partial<ContentQueryDto>) {
+    const { page, limit } = pageValues(query);
+    const status = contentStatus(query.status, Object.values(ReviewStatus));
+    const filter = {
+      ...(status ? { status } : {}),
+      ...(query.search?.trim()
+        ? { comment: new RegExp(literal(query.search.trim()), 'i') }
+        : {}),
+    };
+    const [items, total] = await Promise.all([
+      this.reviewModel
+        .find(filter)
+        .select(
+          'orderId buyerId farmerId productNames rating comment farmerReply status createdAt',
+        )
+        .populate('buyerId', USER_FIELDS)
+        .populate('farmerId', USER_FIELDS)
+        .sort({ createdAt: -1, _id: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean()
+        .exec(),
+      this.reviewModel.countDocuments(filter),
+    ]);
+    return { items: items.map(record), total, page, limit };
+  }
   async products(query: Partial<ContentQueryDto>) {
     const { page, limit } = pageValues(query);
     const status = contentStatus(query.status, Object.values(ProductStatus));
@@ -282,7 +491,7 @@ export class AdminContentService {
     };
   }
   async visibility(
-    kind: 'product' | 'post' | 'comment',
+    kind: 'product' | 'post' | 'comment' | 'review',
     id: string,
     dto: ContentVisibilityDto,
     actor: RequestUser,
@@ -310,9 +519,13 @@ export class AdminContentService {
               ? dto.hidden
                 ? PostStatus.Published
                 : PostStatus.Removed
-              : dto.hidden
-                ? CommentStatus.Active
-                : CommentStatus.Removed;
+              : kind === 'review'
+                ? dto.hidden
+                  ? ReviewStatus.Published
+                  : ReviewStatus.Removed
+                : dto.hidden
+                  ? CommentStatus.Active
+                  : CommentStatus.Removed;
         const after =
           kind === 'product'
             ? dto.hidden
@@ -320,14 +533,20 @@ export class AdminContentService {
               ? dto.hidden
                 ? PostStatus.Removed
                 : PostStatus.Published
-              : dto.hidden
-                ? CommentStatus.Removed
-                : CommentStatus.Active;
+              : kind === 'review'
+                ? dto.hidden
+                  ? ReviewStatus.Removed
+                  : ReviewStatus.Published
+                : dto.hidden
+                  ? CommentStatus.Removed
+                  : CommentStatus.Active;
         const model = (kind === 'product'
           ? this.productModel
           : kind === 'post'
             ? this.postModel
-            : this.commentModel) as unknown as Model<{
+            : kind === 'review'
+              ? this.reviewModel
+              : this.commentModel) as unknown as Model<{
           adminHidden?: boolean;
           status?: string;
           postId?: Types.ObjectId;
@@ -361,7 +580,9 @@ export class AdminContentService {
                   ? 'Product'
                   : kind === 'post'
                     ? 'Post'
-                    : 'Comment',
+                    : kind === 'review'
+                      ? 'Review'
+                      : 'Comment',
               targetId: target,
               metadata: {
                 before: { hidden: !dto.hidden },

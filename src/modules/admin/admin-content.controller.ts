@@ -36,6 +36,10 @@ export class ContentQueryDto {
 export class ContentVisibilityDto extends AdminReasonDto {
   @IsBoolean() hidden!: boolean;
 }
+export class ResolveReportsDto extends AdminReasonDto {
+  /** hide: remove the content from members. dismiss: leave it up. */
+  @IsEnum({ hide: 'hide', dismiss: 'dismiss' }) action!: 'hide' | 'dismiss';
+}
 @ApiTags('Admin content')
 @ApiBearerAuth('JWT-auth')
 @Roles(UserRole.Admin)
@@ -80,5 +84,26 @@ export class AdminContentController {
     @CurrentUser() actor: RequestUser,
   ) {
     return this.service.visibility('comment', id, dto, actor);
+  }
+  @Get('community/reports') reports(@Query() query: ContentQueryDto) {
+    return this.service.reports(query);
+  }
+  @Patch('community/reports/:targetType/:id') resolveReports(
+    @Param('targetType') targetType: string,
+    @Param('id') id: string,
+    @Body() dto: ResolveReportsDto,
+    @CurrentUser() actor: RequestUser,
+  ) {
+    return this.service.resolveReports(targetType, id, dto, actor);
+  }
+  @Get('reviews') reviews(@Query() query: ContentQueryDto) {
+    return this.service.reviews(query);
+  }
+  @Patch('reviews/:id/visibility') reviewVisibility(
+    @Param('id') id: string,
+    @Body() dto: ContentVisibilityDto,
+    @CurrentUser() actor: RequestUser,
+  ) {
+    return this.service.visibility('review', id, dto, actor);
   }
 }

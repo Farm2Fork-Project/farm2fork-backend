@@ -84,6 +84,36 @@ export class RepaymentInstallmentDto {
   @ApiPropertyOptional() paidAt?: string;
 }
 
+export class CreditFactorDto {
+  @ApiProperty({
+    enum: [
+      'sales_history',
+      'repayment_capacity',
+      'repayment_history',
+      'buyer_feedback',
+      'account_standing',
+      'profile_completeness',
+    ],
+  })
+  key!: string;
+  @ApiProperty() points!: number;
+  @ApiProperty() maxPoints!: number;
+  @ApiProperty({ description: 'Why the factor scored as it did' })
+  summary!: string;
+}
+
+export class CreditAssessmentDto {
+  @ApiProperty({ minimum: 0, maximum: 100 }) score!: number;
+  @ApiProperty({ enum: ['strong', 'fair', 'limited', 'weak'] }) band!: string;
+  @ApiProperty({
+    enum: ['high', 'medium', 'low'],
+    description: 'How much platform history stands behind the score',
+  })
+  confidence!: string;
+  @ApiProperty({ type: [CreditFactorDto] }) factors!: CreditFactorDto[];
+  @ApiProperty() modelVersion!: string;
+}
+
 export class LoanApplicantDto {
   @ApiProperty() farmName!: string;
   @ApiPropertyOptional() city?: string;
@@ -120,6 +150,12 @@ export class LoanApplicationResponseDto {
     description: 'Financial partners and admins only',
   })
   applicant?: LoanApplicantDto;
+  @ApiPropertyOptional({
+    type: CreditAssessmentDto,
+    description:
+      'Advisory Farm2Fork credit assessment. Financial partners and admins only',
+  })
+  credit?: CreditAssessmentDto;
   @ApiPropertyOptional({
     type: [LoanDocumentDto],
     description: 'Only on the single-application read',

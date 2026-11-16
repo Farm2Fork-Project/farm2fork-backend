@@ -3,6 +3,11 @@ import { AdminContentService } from './admin-content.service';
 import { AdminContentController } from './admin-content.controller';
 import { Post, PostSchema } from '../community/schemas/post.schema';
 import { Comment, CommentSchema } from '../community/schemas/comment.schema';
+import {
+  ContentReport,
+  ContentReportSchema,
+} from '../community/schemas/content-report.schema';
+import { Review, ReviewSchema } from '../community/schemas/review.schema';
 import { Module } from '@nestjs/common';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
@@ -35,6 +40,8 @@ import { SystemConfigService } from './services/system-config.service';
       { name: Payment.name, schema: PaymentSchema },
       { name: Post.name, schema: PostSchema },
       { name: Comment.name, schema: CommentSchema },
+      { name: ContentReport.name, schema: ContentReportSchema },
+      { name: Review.name, schema: ReviewSchema },
       { name: TransporterProfile.name, schema: TransporterProfileSchema },
       { name: Order.name, schema: OrderSchema },
       { name: Product.name, schema: ProductSchema },

@@ -38,6 +38,7 @@ describe('Python HTTP -> backend AI release contract', () => {
           }),
         }),
       } as unknown as Model<FarmerProfileDocument>,
+      { reference: () => Promise.resolve(undefined) } as never,
     );
   });
   afterEach(() => {

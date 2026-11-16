@@ -33,6 +33,7 @@ import {
   MAX_LOAN_DOCUMENTS,
   QueryLoansDto,
 } from './dto/loan.dto';
+import { LoanCreditService } from './loan-credit.service';
 import {
   LoanApplication,
   LoanApplicationDocument,
@@ -75,6 +76,7 @@ export class LoanService {
     private readonly systemConfig: SystemConfigService,
     private readonly storage: StorageService,
     private readonly notifications: NotificationService,
+    private readonly credit: LoanCreditService,
   ) {}
 
   async limits(): Promise<LoanLimitsDto> {
@@ -97,15 +99,17 @@ export class LoanService {
       throw new ForbiddenException('Only farmers can apply for loans');
     }
     const safeFiles: UploadedDocument[] =
-      files == null ? [] : Array.isArray(files) ? files : (() => {
-        throw new BadRequestException('Invalid documents payload');
-      })();
+      files == null
+        ? []
+        : Array.isArray(files)
+          ? files
+          : (() => {
+              throw new BadRequestException('Invalid documents payload');
+            })();
     if (
       !safeFiles.every(
         (file) =>
-          file &&
-          Buffer.isBuffer(file.buffer) &&
-          typeof file.size === 'number',
+          file && Buffer.isBuffer(file.buffer) && typeof file.size === 'number',
       )
     ) {
       throw new BadRequestException('Invalid document format');
@@ -167,7 +171,7 @@ export class LoanService {
     if (query.status !== undefined) {
       if (
         typeof query.status !== 'string' ||
-        !Object.values(LoanStatus).includes(query.status as LoanStatus)
+        !Object.values(LoanStatus).includes(query.status)
       ) {
         throw new BadRequestException('Invalid loan status filter.');
       }
@@ -184,13 +188,15 @@ export class LoanService {
         .exec(),
       this.loanModel.countDocuments(filter).exec(),
     ]);
-    const applicants = await this.applicantSummaries(
-      loans.map((loan) => loan.applicantId),
-    );
+    const [applicants, credit] = await Promise.all([
+      this.applicantSummaries(loans.map((loan) => loan.applicantId)),
+      this.credit.assess(loans.map(creditSubject)),
+    ]);
     return {
       data: loans.map((loan) =>
         this.toResponse(loan, {
           applicant: applicants.get(loan.applicantId.toHexString()),
+          credit: credit.get(loan._id.toHexString()),
         }),
       ),
       total,
@@ -214,8 +220,14 @@ export class LoanService {
           loan.applicantId.toHexString(),
         )
       : undefined;
+    const credit = isReviewer
+      ? (await this.credit.assess([creditSubject(loan)])).get(
+          loan._id.toHexString(),
+        )
+      : undefined;
     return this.toResponse(loan, {
       applicant,
+      credit,
       documents: loan.documents.map((ref, index) => ({
         index,
         url: this.storage.signedUrl(ref),
@@ -246,6 +258,10 @@ export class LoanService {
     ipAddress?: string,
   ): Promise<LoanApplicationResponseDto> {
     const before = await this.requireLoan(id);
+    // Recorded with the decision so an audit can see what the reviewer saw.
+    const assessment = (await this.credit.assess([creditSubject(before)])).get(
+      before._id.toHexString(),
+    );
     const update: Partial<LoanApplication> = {
       status: dto.decision,
       reviewedBy: new Types.ObjectId(reviewer.id),
@@ -269,7 +285,14 @@ export class LoanService {
       // Status and amounts only: never documents (master context 6.6).
       metadata: {
         before: { status: before.status },
-        after: { status: loan.status, amount: loan.amount },
+        after: {
+          status: loan.status,
+          amount: loan.amount,
+          creditScore: assessment?.score,
+          creditBand: assessment?.band,
+          creditConfidence: assessment?.confidence,
+          creditModel: assessment?.modelVersion,
+        },
       },
       ipAddress,
     });
@@ -451,6 +474,13 @@ export class LoanService {
     };
   }
 }
+
+const creditSubject = (loan: LoanApplicationDocument) => ({
+  loanId: loan._id,
+  applicantId: loan.applicantId,
+  amount: loan.amount,
+  durationMonths: loan.durationMonths,
+});
 
 /**
  * Equal monthly instalments in whole rupees, the last one absorbing the

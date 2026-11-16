@@ -16,6 +16,8 @@ export enum NotificationType {
    * fee (owner-approved addition to master context 5.15).
    */
   DeliveryOffer = 'delivery_offer',
+  /** A reply, like or review on something the user shared. */
+  CommunityActivity = 'community_activity',
 }
 
 /**

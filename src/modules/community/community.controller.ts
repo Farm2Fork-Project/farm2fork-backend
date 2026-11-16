@@ -5,7 +5,9 @@ import {
   Get,
   HttpCode,
   Param,
+  Patch,
   Post,
+  Put,
   Query,
   UploadedFiles,
   UseInterceptors,
@@ -32,15 +34,24 @@ import {
   CommentResponseDto,
   CreateCommentDto,
   CreatePostDto,
+  LikeStateDto,
   MAX_POST_IMAGES,
+  MemberProfileDto,
   PostPageDto,
   PostResponseDto,
   QueryPostsDto,
+  ReportContentDto,
+  TagCountDto,
+  UpdatePostDto,
 } from './dto/community.dto';
 
-/** Posts are written by farmers and buyers (master context 5.13). */
-const AUTHORS = [UserRole.Farmer, UserRole.Buyer];
-const READERS = [...AUTHORS, UserRole.Transporter, UserRole.Admin];
+/**
+ * Farmers, buyers and transporters all take part (the original master
+ * context 5.13 limited writing to farmers and buyers). Admins read and
+ * moderate but do not post as members.
+ */
+const AUTHORS = [UserRole.Farmer, UserRole.Buyer, UserRole.Transporter];
+const READERS = [...AUTHORS, UserRole.Admin];
 
 @ApiTags('Community')
 @ApiBearerAuth('JWT-auth')
@@ -53,8 +64,29 @@ export class CommunityController {
   @ApiOperation({ summary: 'Community feed, newest first (US-13)' })
   @ApiOkResponse({ type: PostPageDto })
   @ApiErrorResponses(400, 401, 403)
-  list(@Query() query: QueryPostsDto): Promise<PostPageDto> {
-    return this.community.list(query);
+  list(
+    @CurrentUser() user: RequestUser,
+    @Query() query: QueryPostsDto,
+  ): Promise<PostPageDto> {
+    return this.community.list(query, user);
+  }
+
+  @Get('tags/trending')
+  @Roles(...READERS)
+  @ApiOperation({ summary: 'Most used tags in the last 30 days' })
+  @ApiOkResponse({ type: [TagCountDto] })
+  @ApiErrorResponses(401, 403)
+  trendingTags(): Promise<TagCountDto[]> {
+    return this.community.trendingTags();
+  }
+
+  @Get('members/:memberId')
+  @Roles(...READERS)
+  @ApiOperation({ summary: "A member's public community profile" })
+  @ApiOkResponse({ type: MemberProfileDto })
+  @ApiErrorResponses(401, 403, 404)
+  member(@Param('memberId') memberId: string): Promise<MemberProfileDto> {
+    return this.community.member(memberId);
   }
 
   @Post()
@@ -97,8 +129,77 @@ export class CommunityController {
   @ApiOperation({ summary: 'One post' })
   @ApiOkResponse({ type: PostResponseDto })
   @ApiErrorResponses(401, 403, 404)
-  findOne(@Param('id') id: string): Promise<PostResponseDto> {
-    return this.community.findOne(id);
+  findOne(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+  ): Promise<PostResponseDto> {
+    return this.community.findOne(id, user);
+  }
+
+  @Patch(':id')
+  @Roles(...AUTHORS)
+  @ApiOperation({ summary: 'Edit your own post' })
+  @ApiOkResponse({ type: PostResponseDto })
+  @ApiErrorResponses(400, 401, 403, 404)
+  update(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Body() dto: UpdatePostDto,
+  ): Promise<PostResponseDto> {
+    return this.community.update(id, user, dto);
+  }
+
+  @Put(':id/like')
+  @Roles(...AUTHORS)
+  @ApiOperation({ summary: 'Like a post (idempotent)' })
+  @ApiOkResponse({ type: LikeStateDto })
+  @ApiErrorResponses(401, 403, 404)
+  like(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+  ): Promise<LikeStateDto> {
+    return this.community.like(id, user);
+  }
+
+  @Delete(':id/like')
+  @Roles(...AUTHORS)
+  @ApiOperation({ summary: 'Remove your like (idempotent)' })
+  @ApiOkResponse({ type: LikeStateDto })
+  @ApiErrorResponses(401, 403, 404)
+  unlike(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+  ): Promise<LikeStateDto> {
+    return this.community.unlike(id, user);
+  }
+
+  @Post(':id/report')
+  @HttpCode(204)
+  @Roles(...AUTHORS)
+  @ApiOperation({ summary: 'Report a post to the admin team' })
+  @ApiNoContentResponse()
+  @ApiErrorResponses(400, 401, 403, 404, 409)
+  async report(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Body() dto: ReportContentDto,
+  ): Promise<void> {
+    await this.community.reportPost(id, user, dto);
+  }
+
+  @Post(':id/comments/:commentId/report')
+  @HttpCode(204)
+  @Roles(...AUTHORS)
+  @ApiOperation({ summary: 'Report a comment to the admin team' })
+  @ApiNoContentResponse()
+  @ApiErrorResponses(400, 401, 403, 404, 409)
+  async reportComment(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Param('commentId') commentId: string,
+    @Body() dto: ReportContentDto,
+  ): Promise<void> {
+    await this.community.reportComment(id, commentId, user, dto);
   }
 
   @Delete(':id')
