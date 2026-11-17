@@ -32,6 +32,7 @@ import { MarketplaceModule } from './modules/marketplace/marketplace.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { OrderModule } from './modules/order/order.module';
 import { PaymentModule } from './modules/payment/payment.module';
+import { RatesModule } from './modules/rates/rates.module';
 import { TraceabilityModule } from './modules/traceability/traceability.module';
 import { TransportModule } from './modules/transport/transport.module';
 
@@ -52,6 +53,7 @@ const featureModules = [
   AdminModule,
   CommunityModule,
   NotificationModule,
+  RatesModule,
   AiModule,
 ];
 

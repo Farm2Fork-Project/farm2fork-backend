@@ -22,7 +22,12 @@ export interface NotifyInput {
   title: string;
   message: string;
   relatedEntityId?: Types.ObjectId | string;
-  relatedEntityModel?: 'Order' | 'Shipment' | 'LoanApplication' | 'Post';
+  relatedEntityModel?:
+    | 'Order'
+    | 'Shipment'
+    | 'LoanApplication'
+    | 'Post'
+    | 'Review';
 }
 
 /** FCM errors that mean the stored token will never work again. */

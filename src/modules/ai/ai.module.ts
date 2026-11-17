@@ -4,6 +4,7 @@ import {
   FarmerProfile,
   FarmerProfileSchema,
 } from '../auth/schemas/farmer-profile.schema';
+import { RatesModule } from '../rates/rates.module';
 import { AiController } from './ai.controller';
 import { AiService } from './ai.service';
 import {
@@ -22,6 +23,7 @@ import {
       { name: AiPrediction.name, schema: AiPredictionSchema },
       { name: FarmerProfile.name, schema: FarmerProfileSchema },
     ]),
+    RatesModule,
   ],
   controllers: [AiController],
   providers: [AiService],

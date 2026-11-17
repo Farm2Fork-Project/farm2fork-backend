@@ -2,8 +2,10 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AdminModule } from '../admin/admin.module';
 import { AuthModule } from '../auth/auth.module';
+import { CommunityModule } from '../community/community.module';
 import { OrderModule } from '../order/order.module';
 import { LoanController } from './loan.controller';
+import { LoanCreditService } from './loan-credit.service';
 import { LoanService } from './loan.service';
 import {
   LoanApplication,
@@ -22,9 +24,10 @@ import {
     AuthModule,
     OrderModule,
     AdminModule,
+    CommunityModule,
   ],
   controllers: [LoanController],
-  providers: [LoanService],
+  providers: [LoanService, LoanCreditService],
   exports: [MongooseModule],
 })
 export class LoanModule {}

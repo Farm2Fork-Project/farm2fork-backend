@@ -10,7 +10,11 @@ import { FarmerProfile } from '../auth/schemas/farmer-profile.schema';
 import { User } from '../auth/schemas/user.schema';
 import { CommunityService } from './community.service';
 import { CreatePostDto } from './dto/community.dto';
+import { NotificationService } from '../notification/notification.service';
 import { Comment, CommentStatus } from './schemas/comment.schema';
+import { ContentReport, ReportReason } from './schemas/content-report.schema';
+import { PostLike } from './schemas/post-like.schema';
+import { Review } from './schemas/review.schema';
 import { Post, PostStatus } from './schemas/post.schema';
 
 const chain = (value: unknown) => {
@@ -62,6 +66,8 @@ describe('CommunityService', () => {
   let postModel: Record<string, jest.Mock>;
   let commentModel: Record<string, jest.Mock>;
   let storage: Record<string, jest.Mock>;
+  let likeModel: Record<string, jest.Mock>;
+  let reportModel: Record<string, jest.Mock>;
   const session = {
     withTransaction: jest.fn((fn: () => Promise<unknown>) => fn()),
     endSession: jest.fn(),
@@ -94,6 +100,13 @@ describe('CommunityService', () => {
       create: jest.fn(),
       updateOne: jest.fn(() => chain({ modifiedCount: 1 })),
     };
+    likeModel = {
+      find: jest.fn(() => chain([])),
+      exists: jest.fn(() => ({ session: () => chain(null) })),
+      create: jest.fn().mockResolvedValue([{}]),
+      deleteOne: jest.fn(() => chain({ deletedCount: 1 })),
+    };
+    reportModel = { create: jest.fn().mockResolvedValue({}) };
     storage = {
       validate: jest.fn(),
       uploadPublicImage: jest.fn().mockResolvedValue('https://cdn/x.jpg'),
@@ -132,6 +145,16 @@ describe('CommunityService', () => {
           useValue: { startSession: jest.fn().mockResolvedValue(session) },
         },
         { provide: StorageService, useValue: storage },
+        { provide: getModelToken(PostLike.name), useValue: likeModel },
+        { provide: getModelToken(ContentReport.name), useValue: reportModel },
+        {
+          provide: getModelToken(Review.name),
+          useValue: { aggregate: jest.fn(() => chain([])) },
+        },
+        {
+          provide: NotificationService,
+          useValue: { notifyInBackground: jest.fn() },
+        },
       ],
     }).compile();
     service = moduleRef.get(CommunityService);
@@ -199,5 +222,56 @@ describe('CommunityService', () => {
       author,
     );
     expect(postModel.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('likes once, counts it, and reports the new state', async () => {
+    postModel.findById = jest.fn(() => chain({ likeCount: 1 }));
+    const state = await service.like(
+      new Types.ObjectId().toHexString(),
+      stranger,
+    );
+    expect(likeModel.create).toHaveBeenCalledTimes(1);
+    expect(postModel.updateOne).toHaveBeenCalledWith(
+      expect.anything(),
+      { $inc: { likeCount: 1 } },
+      expect.anything(),
+    );
+    expect(state).toEqual({ likeCount: 1, likedByMe: true });
+  });
+
+  it('does not count a second like from the same member', async () => {
+    likeModel.exists = jest.fn(() => ({ session: () => chain({ _id: 1 }) }));
+    postModel.findById = jest.fn(() => chain({ likeCount: 1 }));
+    await service.like(new Types.ObjectId().toHexString(), stranger);
+    expect(likeModel.create).not.toHaveBeenCalled();
+    expect(postModel.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('files a report once and refuses reports on your own post', async () => {
+    const id = new Types.ObjectId().toHexString();
+    await service.reportPost(id, stranger, { reason: ReportReason.Spam });
+    expect(reportModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({ targetType: 'post', reason: 'spam' }),
+    );
+    await expect(
+      service.reportPost(id, author, { reason: ReportReason.Spam }),
+    ).rejects.toThrow('your own content');
+    reportModel.create.mockRejectedValueOnce({ code: 11000 });
+    await expect(
+      service.reportPost(id, stranger, { reason: ReportReason.Abuse }),
+    ).rejects.toThrow('already reported');
+  });
+
+  it('lets only the author edit a post', async () => {
+    const id = new Types.ObjectId().toHexString();
+    await expect(service.update(id, stranger, { title: 'x' })).rejects.toThrow(
+      'your own post',
+    );
+    const mine = post();
+    postModel.findOne = jest.fn(() => chain(mine));
+    const result = await service.update(id, author, { title: 'New title' });
+    expect(mine.save).toHaveBeenCalled();
+    expect(result.title).toBe('New title');
+    expect(result.editedAt).toBeDefined();
   });
 });

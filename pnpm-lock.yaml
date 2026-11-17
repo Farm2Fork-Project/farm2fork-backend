@@ -38,7 +38,7 @@ importers:
         version: 11.0.2(@nestjs/common@11.1.24(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))
       '@nestjs/mongoose':
         specifier: 11.0.4
-        version: 11.0.4(@nestjs/common@11.1.24(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.24)(mongoose@8.24.1)(rxjs@7.8.2)
+        version: 11.0.4(@nestjs/common@11.1.24(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.24)(mongoose@8.24.7)(rxjs@7.8.2)
       '@nestjs/passport':
         specifier: ^11.0.5
         version: 11.0.5(@nestjs/common@11.1.24(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(passport@0.7.0)
@@ -73,8 +73,8 @@ importers:
         specifier: ^18.3.2
         version: 18.3.2
       mongoose:
-        specifier: 8.24.1
-        version: 8.24.1
+        specifier: 8.24.7
+        version: 8.24.7
       passport:
         specifier: ^0.7.0
         version: 0.7.0
@@ -3018,16 +3018,16 @@ packages:
       socks:
         optional: true
 
-  mongoose@8.24.1:
-    resolution: {integrity: sha512-UpHBA0l5kHyKJQFjmBaFYQFo5sgz1DK0TRqDkOyBLYbqiIbKKhIvBpHWBXqeo0rgW4kGI1UhhAw+kTQZoj1BdA==}
+  mongoose@8.24.7:
+    resolution: {integrity: sha512-+hrEOLpLGPgOt7S/UrcBAKZ4gvB6+5qf16jspWH5xQ8WtQu9lRTzcqy04ZNQrlIox4Pl6Nh2RzlNDPSOFw9rng==}
     engines: {node: '>=16.20.1'}
 
   mpath@0.9.0:
     resolution: {integrity: sha512-ikJRQTk8hw5DEoFVxHG1Gn9T/xcjtdnOKIU1JTmGjZZlg9LST2mBLmcX3/ICIbgJydT2GOc15RnNy5mHmzfSew==}
     engines: {node: '>=4.0.0'}
 
-  mquery@5.0.0:
-    resolution: {integrity: sha512-iQMncpmEK8R8ncT8HJGsGc9Dsp8xcgYMVSbs5jgnm1lFHTZqMJTUWTDx1LBO8+mK3tPNZWFLBghQEIOULSTHZg==}
+  mquery@5.0.1:
+    resolution: {integrity: sha512-C99lWV0TFI34pS008jBsi3JrE2xZPnTgUw5yApQR71nRP0hxLy8D5m1Lbbk83c8AQWJwdJ0329HzFtZ1MRTUIw==}
     engines: {node: '>=14.0.0'}
 
   ms@2.1.3:
@@ -4938,11 +4938,11 @@ snapshots:
       class-transformer: 0.5.1
       class-validator: 0.15.1
 
-  '@nestjs/mongoose@11.0.4(@nestjs/common@11.1.24(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.24)(mongoose@8.24.1)(rxjs@7.8.2)':
+  '@nestjs/mongoose@11.0.4(@nestjs/common@11.1.24(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.24)(mongoose@8.24.7)(rxjs@7.8.2)':
     dependencies:
       '@nestjs/common': 11.1.24(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@nestjs/core': 11.1.24(@nestjs/common@11.1.24(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@11.1.24)(reflect-metadata@0.2.2)(rxjs@7.8.2)
-      mongoose: 8.24.1
+      mongoose: 8.24.7
       rxjs: 7.8.2
 
   '@nestjs/passport@11.0.5(@nestjs/common@11.1.24(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(passport@0.7.0)':
@@ -7506,13 +7506,13 @@ snapshots:
       bson: 7.3.0
       mongodb-connection-string-url: 7.0.1
 
-  mongoose@8.24.1:
+  mongoose@8.24.7:
     dependencies:
       bson: 6.10.4
       kareem: 2.6.3
       mongodb: 6.20.0
       mpath: 0.9.0
-      mquery: 5.0.0
+      mquery: 5.0.1
       ms: 2.1.3
       sift: 17.1.3
     transitivePeerDependencies:
@@ -7527,7 +7527,7 @@ snapshots:
 
   mpath@0.9.0: {}
 
-  mquery@5.0.0:
+  mquery@5.0.1:
     dependencies:
       debug: 4.4.3
     transitivePeerDependencies:

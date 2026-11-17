@@ -11,6 +11,7 @@ import { FarmerProfile } from '../auth/schemas/farmer-profile.schema';
 import { NotificationService } from '../notification/notification.service';
 import { Order } from '../order/schemas/order.schema';
 import { LoanDecisionDto } from './dto/loan.dto';
+import { LoanCreditService } from './loan-credit.service';
 import { LoanService, buildRepaymentSchedule } from './loan.service';
 import { LoanApplication, LoanStatus } from './schemas/loan-application.schema';
 
@@ -112,6 +113,10 @@ describe('LoanService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         LoanService,
+        {
+          provide: LoanCreditService,
+          useValue: { assess: jest.fn().mockResolvedValue(new Map()) },
+        },
         { provide: getModelToken(LoanApplication.name), useValue: loanModel },
         {
           provide: getModelToken(FarmerProfile.name),
